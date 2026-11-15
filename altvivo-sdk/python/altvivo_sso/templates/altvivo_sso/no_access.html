@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Access required • AltVivo</title>
+  <style>
+    :root { --bg:#F8FAFC; --fg:#0B0F19; --muted:#475569; --card:#ffffff; --line:#E2E8F0; --accent:#0EA5E9; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#0B0F19; --fg:#F8FAFC; --muted:#94A3B8; --card:#111827; --line:#1F2937; } }
+    * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--fg);
+           font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; padding:16px; }
+    main { max-width:460px; width:100%; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:32px; }
+    .brand { font-weight:700; color:var(--accent); letter-spacing:.02em; margin:0 0 20px; }
+    h1 { font-size:1.35rem; margin:0 0 10px; }
+    p { color:var(--muted); line-height:1.55; margin:0 0 22px; }
+    .level { font-family: "JetBrains Mono", ui-monospace, monospace; font-size:.8rem; text-transform:uppercase; }
+    .actions { display:flex; gap:10px; flex-wrap:wrap; }
+    a.btn { display:inline-block; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:600; }
+    a.primary { background:var(--accent); color:#fff; }
+    a.secondary { border:1px solid var(--line); color:var(--fg); }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="brand">AltVivo</p>
+    <h1>{% if reason == "email_not_verified" %}Verify your email{% elif reason == "link_refused" %}We could not sign you in{% else %}Upgrade to continue{% endif %}</h1>
+    <p>{{ message }}{% if claims %} Current access: <span class="level">{{ access_level }}</span>.{% endif %}</p>
+    <div class="actions">
+      {% if reason == "not_entitled" %}<a class="btn primary" href="{{ pricing_url }}">View plans</a>{% endif %}
+      <a class="btn {% if reason == 'not_entitled' %}secondary{% else %}primary{% endif %}" href="{{ portal_url }}">Back to your workspace</a>
+    </div>
+  </main>
+</body>
+</html>

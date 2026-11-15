@@ -1,0 +1,978 @@
+// =============================================================================
+// AltVivo core database (db_core) - Prisma schema
+// -----------------------------------------------------------------------------
+// Commercial model: STRICT PAID ACCESS. A user may open a spoke only while a
+// paid grant is in force - their own subscription, a Dual-Suite bundle, their
+// institution's site licence, or a manual licence recorded by a SUPERADMIN
+// (offline NEFT / RTGS / purchase order). There is no free tier or trial.
+// SUPERADMIN and ADVISORY_BOARD bypass billing in altvivo-core, not here.
+//
+// Objects Prisma cannot model (CHECK constraints, triggers, SECURITY DEFINER
+// functions, views, grants, the audit hash chain, gapless GST invoice
+// numbering, invoice tax maths) live in the raw SQL of
+// db/migrations/*/migration.sql. Never edit applied migrations; add new ones.
+//
+// Runtime role  : core_app      (DML only; see the privilege section of each
+//                                migration for the narrowed grants)
+// Migration role: core_migrator (schema owner)
+// Money         : integer minor units (paise / cents), always GST-exclusive
+//                 on plans and subscriptions; invoices carry the tax split.
+// =============================================================================
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------------- Enums -----
+
+/// SUPERADMIN and ADVISORY_BOARD are "VIP" roles: altvivo-core lets them into
+/// every LIVE/BETA spoke without a paid grant (env PAID_GATE_VIP_ROLES).
+enum UserRole {
+  STUDENT
+  RESEARCHER
+  PI
+  INSTITUTE_ADMIN
+  ADVISORY_BOARD
+  SUPERADMIN
+
+  @@map("user_role")
+}
+
+enum OrganizationKind {
+  UNIVERSITY
+  COLLEGE
+  RESEARCH_INSTITUTE
+  HOSPITAL
+  COMPANY
+  GOVERNMENT
+  OTHER
+
+  @@map("organization_kind")
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+
+  @@map("organization_status")
+}
+
+enum AppStatus {
+  LIVE
+  BETA
+  COMING_SOON
+  MAINTENANCE
+
+  @@map("app_status")
+}
+
+/// A paid grant is all-or-nothing today. Declaration order is privilege order.
+enum AccessLevel {
+  NONE
+  FULL
+
+  @@map("access_level")
+}
+
+enum PlanKind {
+  SINGLE_APP
+  BUNDLE
+  SITE_LICENSE
+
+  @@map("plan_kind")
+}
+
+enum PricingModel {
+  FLAT
+  PER_SEAT
+
+  @@map("pricing_model")
+}
+
+enum BillingInterval {
+  MONTH
+  YEAR
+
+  @@map("billing_interval")
+}
+
+/// Online subscription processors.
+enum BillingProvider {
+  RAZORPAY
+  STRIPE
+
+  @@map("billing_provider")
+}
+
+/// RECURRING: the processor renews (Razorpay / Stripe subscription).
+/// ONE_TIME : a prepaid term bought with a single payment; no auto-renewal.
+enum BillingMode {
+  RECURRING
+  ONE_TIME
+
+  @@map("billing_mode")
+}
+
+/// Only ACTIVE and PAST_DUE grant access, and only until current_period_end
+/// (the period the customer has already paid for). PENDING = checkout started.
+enum SubscriptionStatus {
+  PENDING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+
+  @@map("subscription_status")
+}
+
+enum EntitlementSource {
+  SUBSCRIPTION
+  MANUAL
+
+  @@map("entitlement_source")
+}
+
+enum PaymentProvider {
+  RAZORPAY
+  STRIPE
+  BANK_TRANSFER
+
+  @@map("payment_provider")
+}
+
+enum PaymentStatus {
+  CREATED
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  PARTIALLY_REFUNDED
+  REFUNDED
+
+  @@map("payment_status")
+}
+
+enum InvoiceKind {
+  PROFORMA
+  TAX_INVOICE
+  CREDIT_NOTE
+
+  @@map("invoice_kind")
+}
+
+/// DRAFT is editable and deletable. ISSUED freezes every financial field and
+/// assigns the gapless number. ISSUED -> PAID | CANCELLED only.
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  CANCELLED
+
+  @@map("invoice_status")
+}
+
+/// INTRA_STATE: CGST + SGST. INTER_STATE: IGST. EXPORT: zero-rated supply of
+/// services under LUT (place of supply 96 = outside India).
+enum TaxTreatment {
+  INTRA_STATE
+  INTER_STATE
+  EXPORT
+
+  @@map("tax_treatment")
+}
+
+enum FileType {
+  CSV
+  JSON
+  MP4
+  PDF
+
+  @@map("file_type")
+}
+
+enum OAuthProvider {
+  GOOGLE
+  ORCID
+
+  @@map("oauth_provider")
+}
+
+enum AuthTokenPurpose {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+
+  @@map("auth_token_purpose")
+}
+
+enum AuditActorType {
+  USER
+  SERVICE
+  SYSTEM
+
+  @@map("audit_actor_type")
+}
+
+enum ContactStatus {
+  NEW
+  IN_PROGRESS
+  CLOSED
+  SPAM
+
+  @@map("contact_status")
+}
+
+enum ConsentAction {
+  ACCEPT_ALL
+  REJECT_NON_ESSENTIAL
+  CUSTOM
+  WITHDRAW
+
+  @@map("consent_action")
+}
+
+// --------------------------------------------------------- Identity ----------
+
+model User {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email             String    @unique @db.Citext
+  passwordHash      String?   @map("password_hash") /// Argon2id PHC string; null for OAuth-only accounts
+  fullName          String    @map("full_name") @db.VarChar(200)
+  affiliation       String?   @db.VarChar(300)
+  orcidId           String?   @unique @map("orcid_id") @db.VarChar(19)
+  role              UserRole  @default(RESEARCHER)
+  /// Institution membership = one seat of organizations.seat_limit (enforced by trigger).
+  orgId             String?   @map("org_id") @db.Uuid
+  mfaSecret         String?   @map("mfa_secret") /// AES-256-GCM envelope "v1.<iv>.<ciphertext>.<tag>" (base64url)
+  mfaEnabled        Boolean   @default(false) @map("mfa_enabled")
+  mfaEnrolledAt     DateTime? @map("mfa_enrolled_at") @db.Timestamptz(6)
+  emailVerifiedAt   DateTime? @map("email_verified_at") @db.Timestamptz(6)
+  failedLoginCount  Int       @default(0) @map("failed_login_count")
+  lockedUntil       DateTime? @map("locked_until") @db.Timestamptz(6)
+  lastLoginAt       DateTime? @map("last_login_at") @db.Timestamptz(6)
+  passwordChangedAt DateTime? @map("password_changed_at") @db.Timestamptz(6)
+  disabledAt        DateTime? @map("disabled_at") @db.Timestamptz(6) /// suspended by a SUPERADMIN
+  disabledReason    String?   @map("disabled_reason") @db.VarChar(500)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization    Organization?         @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  oauthAccounts   OAuthAccount[]
+  sessions        AuthSession[]
+  authTokens      AuthToken[]
+  recoveryCodes   MfaRecoveryCode[]
+  subscriptions   Subscription[]
+  entitlements    AppEntitlement[]
+  payments        Payment[]
+  invoices        Invoice[]
+  billingProfile  BillingProfile?
+  waitlist        AppWaitlist[]
+  creditAccount   CreditAccount?
+  creditLedger    CreditLedger[]
+  workspaceFiles  WorkspaceFile[]
+  advisoryProfile AdvisoryBoardMember?
+  contactMessages ContactMessage[]
+  consentRecords  ConsentRecord[]
+
+  @@index([orgId])
+  @@index([role])
+  @@map("users")
+}
+
+/// Institutional tenant (college, university, institute). Members join by a
+/// whitelisted e-mail domain or by invitation; each member uses one seat.
+model Organization {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String             @db.VarChar(300)
+  kind            OrganizationKind   @default(OTHER)
+  status          OrganizationStatus @default(ACTIVE)
+  domainWhitelist String[]           @default([]) @map("domain_whitelist")
+  seatLimit       Int                @default(1) @map("seat_limit")
+  billingCountry  String             @map("billing_country") @db.Char(2) /// ISO 3166-1 alpha-2; IN bills in INR via Razorpay / proforma
+  contactName     String?            @map("contact_name") @db.VarChar(200)
+  contactEmail    String?            @map("contact_email") @db.Citext
+  contactPhone    String?            @map("contact_phone") @db.VarChar(20)
+  notes           String?            @db.VarChar(2000) /// internal, SUPERADMIN only
+  suspendedAt     DateTime?          @map("suspended_at") @db.Timestamptz(6)
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  members        User[]
+  subscriptions  Subscription[]
+  entitlements   AppEntitlement[]
+  payments       Payment[]
+  invoices       Invoice[]
+  billingProfile BillingProfile?
+  creditAccount  CreditAccount?
+  creditLedger   CreditLedger[]
+  workspaceFiles WorkspaceFile[]
+
+  @@index([status])
+  @@map("organizations")
+}
+
+model OAuthAccount {
+  id                String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String        @map("user_id") @db.Uuid
+  provider          OAuthProvider
+  providerAccountId String        @map("provider_account_id") @db.VarChar(255)
+  email             String?       @db.Citext
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt        DateTime?     @map("last_used_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("oauth_accounts")
+}
+
+/// One row per login = one refresh-token family.
+model AuthSession {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  mfaVerified  Boolean   @default(false) @map("mfa_verified")
+  ipAddress    String?   @map("ip_address") @db.Inet
+  userAgent    String?   @map("user_agent") @db.VarChar(512)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt   DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokeReason String?   @map("revoke_reason") @db.VarChar(64)
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}
+
+/// Only the HMAC-SHA-256 of a refresh token is stored. Presenting a token
+/// whose row is already rotated (usedAt set) revokes the whole family.
+model RefreshToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId String    @map("session_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  parentId  String?   @unique @map("parent_id") @db.Uuid
+  issuedAt  DateTime  @default(now()) @map("issued_at") @db.Timestamptz(6)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  session AuthSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  parent  RefreshToken? @relation("RefreshTokenRotation", fields: [parentId], references: [id], onDelete: SetNull)
+  child   RefreshToken? @relation("RefreshTokenRotation")
+
+  @@index([sessionId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model AuthToken {
+  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String           @map("user_id") @db.Uuid
+  purpose    AuthTokenPurpose
+  tokenHash  String           @unique @map("token_hash") @db.Char(64)
+  expiresAt  DateTime         @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime?        @map("consumed_at") @db.Timestamptz(6)
+  createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@map("auth_tokens")
+}
+
+model MfaRecoveryCode {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @map("code_hash") @db.Char(64)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, codeHash])
+  @@map("mfa_recovery_codes")
+}
+
+// ------------------------------------------------- Spoke registry -----------
+
+/// Spoke switchboard. `status` is flipped by a SUPERADMIN at /admin; the
+/// trigger stamps who/when and the row-change audit records the flip.
+/// A COMING_SOON app never resolves to active access, even with a grant.
+model AppRegistry {
+  appId           String    @id @map("app_id") @db.VarChar(32)
+  name            String    @db.VarChar(100)
+  tagline         String    @db.VarChar(200)
+  description     String
+  subdomainUrl    String    @unique @map("subdomain_url") @db.VarChar(255)
+  status          AppStatus @default(COMING_SOON)
+  version         String    @default("0.0.0") @db.VarChar(32)
+  requiresCredits Boolean   @default(false) @map("requires_credits")
+  phase           Int       @default(1) @db.SmallInt
+  sortOrder       Int       @default(100) @map("sort_order") @db.SmallInt
+  iconKey         String    @default("box") @map("icon_key") @db.VarChar(64) /// lucide-react icon name
+  highlights      String[]  @default([])
+  statusChangedAt DateTime  @default(now()) @map("status_changed_at") @db.Timestamptz(6)
+  statusChangedBy String?   @map("status_changed_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  entitlements     AppEntitlement[]
+  planEntitlements PlanEntitlement[]
+  waitlist         AppWaitlist[]
+  creditLedger     CreditLedger[]
+  workspaceFiles   WorkspaceFile[]
+  invoiceLines     InvoiceLine[]
+  contactMessages  ContactMessage[]
+
+  @@index([status, sortOrder])
+  @@map("app_registry")
+}
+
+/// Phase 2 pipeline waitlist (/coming-soon). Joining never grants access.
+model AppWaitlist {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String?   @map("user_id") @db.Uuid
+  email      String    @db.Citext
+  appId      String    @map("app_id") @db.VarChar(32)
+  notified   Boolean   @default(false)
+  notifiedAt DateTime? @map("notified_at") @db.Timestamptz(6)
+  source     String    @default("web") @db.VarChar(32) /// web | workspace | coming-soon | topbar | admin
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  app  AppRegistry @relation(fields: [appId], references: [appId], onDelete: Restrict)
+
+  @@unique([email, appId])
+  @@index([appId, notified])
+  @@index([userId])
+  @@map("app_waitlist")
+}
+
+// ----------------------------------------------------------- Billing ---------
+
+/// Price list, editable from the /admin switchboard. Prices exclude GST.
+/// FLAT: price per subscription. PER_SEAT: price x seats (site licences).
+model Plan {
+  planCode       String          @id @map("plan_code") @db.VarChar(64)
+  name           String          @db.VarChar(100)
+  description    String          @default("") @db.VarChar(500)
+  kind           PlanKind
+  pricingModel   PricingModel    @default(FLAT) @map("pricing_model")
+  interval       BillingInterval
+  priceInrPaise  Int             @map("price_inr_paise")
+  priceUsdCents  Int             @map("price_usd_cents")
+  minSeats       Int             @default(1) @map("min_seats")
+  maxSeats       Int?            @map("max_seats") /// null = unlimited
+  monthlyCredits Int             @default(0) @map("monthly_credits")
+  sacCode        String          @default("997331") @map("sac_code") @db.VarChar(8) /// GST services accounting code
+  gstRateBp      Int             @default(1800) @map("gst_rate_bp") @db.SmallInt /// basis points (1800 = 18 %)
+  stripePriceId  String?         @unique @map("stripe_price_id") @db.VarChar(255)
+  razorpayPlanId String?         @unique @map("razorpay_plan_id") @db.VarChar(255)
+  isPublic       Boolean         @default(true) @map("is_public")
+  highlighted    Boolean         @default(false) /// "Best value" badge on /pricing
+  active         Boolean         @default(true)
+  sortOrder      Int             @default(100) @map("sort_order") @db.SmallInt
+  features       String[]        @default([])
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  entitlements  PlanEntitlement[]
+  subscriptions Subscription[]
+  payments      Payment[]
+  invoiceLines  InvoiceLine[]
+
+  @@index([kind, active, sortOrder])
+  @@map("plans")
+}
+
+/// Which apps a plan unlocks (single app = 1 row, bundle / site licence = 2).
+model PlanEntitlement {
+  planCode    String      @map("plan_code") @db.VarChar(64)
+  appId       String      @map("app_id") @db.VarChar(32)
+  accessLevel AccessLevel @default(FULL) @map("access_level")
+
+  plan Plan        @relation(fields: [planCode], references: [planCode], onDelete: Cascade)
+  app  AppRegistry @relation(fields: [appId], references: [appId], onDelete: Cascade)
+
+  @@id([planCode, appId])
+  @@map("plan_entitlements")
+}
+
+/// A paid term for one user (single app, bundle) or one organization (site
+/// licence). Access lasts while status is ACTIVE / PAST_DUE and
+/// now() < current_period_end. unitAmountMinor freezes the price paid
+/// (GST-exclusive, per seat for PER_SEAT plans) so MRR survives price edits.
+model Subscription {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId             String?            @map("user_id") @db.Uuid
+  orgId              String?            @map("org_id") @db.Uuid
+  provider           BillingProvider
+  billingMode        BillingMode        @default(RECURRING) @map("billing_mode")
+  externalSubId      String?            @map("external_sub_id") @db.VarChar(255) /// required for RECURRING
+  externalCustomerId String?            @map("external_customer_id") @db.VarChar(255)
+  planCode           String             @map("plan_code") @db.VarChar(64)
+  status             SubscriptionStatus
+  currency           String             @db.Char(3)
+  seats              Int                @default(1)
+  unitAmountMinor    BigInt             @map("unit_amount_minor")
+  currentPeriodStart DateTime?          @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd   DateTime           @map("current_period_end") @db.Timestamptz(6)
+  cancelAtPeriodEnd  Boolean            @default(false) @map("cancel_at_period_end")
+  canceledAt         DateTime?          @map("canceled_at") @db.Timestamptz(6)
+  endedAt            DateTime?          @map("ended_at") @db.Timestamptz(6)
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user         User?            @relation(fields: [userId], references: [id], onDelete: Restrict)
+  organization Organization?    @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  plan         Plan             @relation(fields: [planCode], references: [planCode], onDelete: Restrict)
+  entitlements AppEntitlement[]
+  payments     Payment[]
+  invoices     Invoice[]
+
+  @@unique([provider, externalSubId])
+  @@index([userId, status])
+  @@index([orgId, status])
+  @@index([status, currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+/// Every paid grant of an app.
+///  SUBSCRIPTION rows are materialised from plan_entitlements by a trigger
+///  (owner and term come from the subscription).
+///  MANUAL rows are licences a SUPERADMIN records for offline payments: one
+///  holder (user or organization), a reason, and a mandatory expiry. They are
+///  revoked (revokedAt), never deleted.
+model AppEntitlement {
+  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  appId        String            @map("app_id") @db.VarChar(32)
+  source       EntitlementSource @default(SUBSCRIPTION)
+  subId        String?           @map("sub_id") @db.Uuid
+  userId       String?           @map("user_id") @db.Uuid
+  orgId        String?           @map("org_id") @db.Uuid
+  accessLevel  AccessLevel       @default(FULL) @map("access_level")
+  startsAt     DateTime          @default(now()) @map("starts_at") @db.Timestamptz(6)
+  expiresAt    DateTime?         @map("expires_at") @db.Timestamptz(6)
+  grantedAt    DateTime          @default(now()) @map("granted_at") @db.Timestamptz(6)
+  grantedBy    String?           @map("granted_by") @db.Uuid
+  reason       String?           @db.VarChar(500)
+  reference    String?           @db.VarChar(120) /// PO number, UTR, cheque no.
+  revokedAt    DateTime?         @map("revoked_at") @db.Timestamptz(6)
+  revokedBy    String?           @map("revoked_by") @db.Uuid
+  revokeReason String?           @map("revoke_reason") @db.VarChar(500)
+
+  subscription Subscription? @relation(fields: [subId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  app          AppRegistry   @relation(fields: [appId], references: [appId], onDelete: Restrict)
+
+  @@unique([subId, appId])
+  @@index([appId])
+  @@index([userId, appId])
+  @@index([orgId, appId])
+  @@index([source, expiresAt])
+  @@map("app_entitlements")
+}
+
+/// Bill-to details reused at checkout (one per user or organization).
+model BillingProfile {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String?  @unique @map("user_id") @db.Uuid
+  orgId        String?  @unique @map("org_id") @db.Uuid
+  legalName    String   @map("legal_name") @db.VarChar(200)
+  gstin        String?  @db.VarChar(15)
+  email        String   @db.Citext
+  phone        String?  @db.VarChar(20)
+  addressLine1 String   @map("address_line1") @db.VarChar(200)
+  addressLine2 String?  @map("address_line2") @db.VarChar(200)
+  city         String   @db.VarChar(100)
+  state        String?  @db.VarChar(100)
+  stateCode    String?  @map("state_code") @db.Char(2) /// GST state code; required in India
+  postalCode   String   @map("postal_code") @db.VarChar(12)
+  country      String   @db.Char(2)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("billing_profiles")
+}
+
+/// Money actually received (or attempted). Amounts include GST. Online
+/// payments come from verified webhooks; BANK_TRANSFER rows are recorded by a
+/// SUPERADMIN with the UTR / cheque reference. Never deleted.
+model Payment {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider          PaymentProvider
+  status            PaymentStatus   @default(CREATED)
+  userId            String?         @map("user_id") @db.Uuid
+  orgId             String?         @map("org_id") @db.Uuid
+  subscriptionId    String?         @map("subscription_id") @db.Uuid
+  invoiceId         String?         @map("invoice_id") @db.Uuid /// tax invoice / proforma this payment settles
+  planCode          String?         @map("plan_code") @db.VarChar(64)
+  currency          String          @db.Char(3)
+  amountMinor       BigInt          @map("amount_minor") /// gross, GST included
+  taxMinor          BigInt          @default(0) @map("tax_minor")
+  refundedMinor     BigInt          @default(0) @map("refunded_minor")
+  feeMinor          BigInt?         @map("fee_minor") /// processor fee, when reported
+  method            String?         @db.VarChar(32) /// upi | card | netbanking | wallet | neft | rtgs | cheque | ...
+  providerOrderId   String?         @map("provider_order_id") @db.VarChar(255)
+  providerPaymentId String?         @map("provider_payment_id") @db.VarChar(255)
+  reference         String?         @db.VarChar(120) /// UTR / cheque / PO for BANK_TRANSFER
+  description       String          @db.VarChar(300)
+  failureCode       String?         @map("failure_code") @db.VarChar(64)
+  failureReason     String?         @map("failure_reason") @db.VarChar(500)
+  recordedBy        String?         @map("recorded_by") @db.Uuid
+  metadata          Json            @default("{}")
+  capturedAt        DateTime?       @map("captured_at") @db.Timestamptz(6)
+  refundedAt        DateTime?       @map("refunded_at") @db.Timestamptz(6)
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  invoice      Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  plan         Plan?         @relation(fields: [planCode], references: [planCode], onDelete: Restrict)
+
+  @@unique([provider, providerPaymentId])
+  @@index([providerOrderId])
+  @@index([userId, createdAt])
+  @@index([orgId, createdAt])
+  @@index([status, capturedAt])
+  @@index([invoiceId])
+  @@map("payments")
+}
+
+/// GST tax invoices, proforma invoices (academic procurement quotations) and
+/// credit notes. Seller and buyer details are snapshots taken at creation, so
+/// an issued document never changes when a profile is edited. Line amounts and
+/// header totals are computed by triggers; numbers come from invoice_series
+/// (gapless per kind and Indian financial year, e.g. AV/2026-27/00042).
+model Invoice {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind             InvoiceKind
+  status           InvoiceStatus @default(DRAFT)
+  number           String?       @unique @db.VarChar(16) /// assigned on issue
+  financialYear    String?       @map("financial_year") @db.VarChar(7) /// "2026-27", assigned on issue
+  userId           String?       @map("user_id") @db.Uuid
+  orgId            String?       @map("org_id") @db.Uuid
+  subscriptionId   String?       @map("subscription_id") @db.Uuid
+  relatedInvoiceId String?       @map("related_invoice_id") @db.Uuid /// credit note -> invoice; tax invoice -> proforma
+  currency         String        @db.Char(3)
+  taxTreatment     TaxTreatment  @map("tax_treatment")
+  sellerLegalName  String        @map("seller_legal_name") @db.VarChar(200)
+  sellerGstin      String?       @map("seller_gstin") @db.VarChar(15)
+  sellerAddress    String        @map("seller_address") @db.VarChar(600)
+  sellerStateCode  String        @map("seller_state_code") @db.Char(2)
+  buyerName        String        @map("buyer_name") @db.VarChar(200)
+  buyerEmail       String        @map("buyer_email") @db.Citext
+  buyerGstin       String?       @map("buyer_gstin") @db.VarChar(15)
+  buyerAddress     String        @map("buyer_address") @db.VarChar(600)
+  buyerStateCode   String?       @map("buyer_state_code") @db.Char(2)
+  buyerCountry     String        @map("buyer_country") @db.Char(2)
+  placeOfSupply    String        @map("place_of_supply") @db.Char(2) /// GST state code; 96 = outside India
+  poNumber         String?       @map("po_number") @db.VarChar(64)
+  notes            String?       @db.VarChar(2000)
+  subtotalMinor    BigInt        @default(0) @map("subtotal_minor") /// set by trigger
+  discountMinor    BigInt        @default(0) @map("discount_minor") /// set by trigger
+  taxableMinor     BigInt        @default(0) @map("taxable_minor") /// set by trigger
+  cgstMinor        BigInt        @default(0) @map("cgst_minor") /// set by trigger
+  sgstMinor        BigInt        @default(0) @map("sgst_minor") /// set by trigger
+  igstMinor        BigInt        @default(0) @map("igst_minor") /// set by trigger
+  totalMinor       BigInt        @default(0) @map("total_minor") /// set by trigger
+  validUntil       DateTime?     @map("valid_until") @db.Date /// proforma only (required)
+  dueDate          DateTime?     @map("due_date") @db.Date
+  issuedAt         DateTime?     @map("issued_at") @db.Timestamptz(6)
+  paidAt           DateTime?     @map("paid_at") @db.Timestamptz(6)
+  cancelledAt      DateTime?     @map("cancelled_at") @db.Timestamptz(6)
+  cancelReason     String?       @map("cancel_reason") @db.VarChar(500)
+  pdfObjectKey     String?       @map("pdf_object_key") @db.VarChar(1024) /// R2 key of the rendered PDF (set once)
+  pdfSha256        String?       @map("pdf_sha256") @db.Char(64)
+  createdBy        String?       @map("created_by") @db.Uuid
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user           User?         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  organization   Organization? @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  relatedInvoice Invoice?      @relation("InvoiceRelation", fields: [relatedInvoiceId], references: [id], onDelete: Restrict)
+  derived        Invoice[]     @relation("InvoiceRelation")
+  lines          InvoiceLine[]
+  payments       Payment[]
+
+  @@index([userId, createdAt])
+  @@index([orgId, createdAt])
+  @@index([kind, status, issuedAt])
+  @@index([subscriptionId])
+  @@map("invoices")
+}
+
+/// Editable only while the invoice is DRAFT. taxable/cgst/sgst/igst/total
+/// are computed by trigger from quantity, unit price, discount, rate and the
+/// invoice's tax treatment (half-up rounding per line, in minor units).
+model InvoiceLine {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoiceId      String    @map("invoice_id") @db.Uuid
+  position       Int       @db.SmallInt
+  description    String    @db.VarChar(500)
+  sacCode        String    @map("sac_code") @db.VarChar(8)
+  appId          String?   @map("app_id") @db.VarChar(32)
+  planCode       String?   @map("plan_code") @db.VarChar(64)
+  quantity       Int
+  unitPriceMinor BigInt    @map("unit_price_minor")
+  discountMinor  BigInt    @default(0) @map("discount_minor")
+  gstRateBp      Int       @map("gst_rate_bp") @db.SmallInt
+  taxableMinor   BigInt    @default(0) @map("taxable_minor") /// set by trigger
+  cgstMinor      BigInt    @default(0) @map("cgst_minor") /// set by trigger
+  sgstMinor      BigInt    @default(0) @map("sgst_minor") /// set by trigger
+  igstMinor      BigInt    @default(0) @map("igst_minor") /// set by trigger
+  totalMinor     BigInt    @default(0) @map("total_minor") /// set by trigger
+  periodStart    DateTime? @map("period_start") @db.Date
+  periodEnd      DateTime? @map("period_end") @db.Date
+
+  invoice Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  app     AppRegistry? @relation(fields: [appId], references: [appId], onDelete: Restrict)
+  plan    Plan?        @relation(fields: [planCode], references: [planCode], onDelete: Restrict)
+
+  @@unique([invoiceId, position])
+  @@map("invoice_lines")
+}
+
+/// Gapless counters, one row per (prefix, financial year). Written only by
+/// the SECURITY DEFINER issue trigger; AV = tax invoice, PF = proforma,
+/// CN = credit note.
+model InvoiceSeries {
+  prefix        String   @db.VarChar(4)
+  financialYear String   @map("financial_year") @db.VarChar(7)
+  lastNumber    Int      @map("last_number")
+  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([prefix, financialYear])
+  @@map("invoice_series")
+}
+
+/// Webhook idempotency + forensic record of every billing event received.
+model BillingEvent {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider        BillingProvider
+  externalEventId String          @map("external_event_id") @db.VarChar(255)
+  eventType       String          @map("event_type") @db.VarChar(128)
+  payloadSha256   String          @map("payload_sha256") @db.Char(64)
+  payload         Json
+  receivedAt      DateTime        @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt     DateTime?       @map("processed_at") @db.Timestamptz(6)
+  error           String?
+
+  @@unique([provider, externalEventId])
+  @@index([processedAt])
+  @@map("billing_events")
+}
+
+// ------------------------------------------------------ Compute credits ------
+
+/// Materialised balance, maintained ONLY by the credit_ledger trigger.
+/// Exactly one of userId / orgId is set.
+model CreditAccount {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String?  @unique @map("user_id") @db.Uuid
+  orgId     String?  @unique @map("org_id") @db.Uuid
+  balance   Int      @default(0)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  user         User?          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  organization Organization?  @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  entries      CreditLedger[]
+
+  @@map("credit_accounts")
+}
+
+/// Append-only. Insert {userId|orgId, appId, actionType, delta, referenceId};
+/// the trigger resolves accountId (org account when orgId is set, else the
+/// user's), computes balanceAfter under a row lock and rejects overdrafts.
+model CreditLedger {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId    String?  @map("account_id") @db.Uuid /// set by trigger
+  userId       String?  @map("user_id") @db.Uuid
+  orgId        String?  @map("org_id") @db.Uuid
+  appId        String?  @map("app_id") @db.VarChar(32)
+  actionType   String   @map("action_type") @db.VarChar(64)
+  delta        Int
+  balanceAfter Int      @default(0) @map("balance_after") /// set by trigger
+  referenceId  String   @map("reference_id") @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  account      CreditAccount? @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  user         User?          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  organization Organization?  @relation(fields: [orgId], references: [id], onDelete: Restrict)
+  app          AppRegistry?   @relation(fields: [appId], references: [appId], onDelete: Restrict)
+
+  @@unique([accountId, actionType, referenceId])
+  @@index([accountId, createdAt])
+  @@index([userId, createdAt])
+  @@map("credit_ledger")
+}
+
+// --------------------------------------------------- Cross-app vault --------
+
+model WorkspaceFile {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId     String    @map("owner_id") @db.Uuid
+  orgId       String?   @map("org_id") @db.Uuid
+  sourceApp   String    @map("source_app") @db.VarChar(32)
+  fileName    String    @map("file_name") @db.VarChar(255)
+  fileType    FileType  @map("file_type")
+  r2ObjectKey String    @unique @map("r2_object_key") @db.VarChar(1024)
+  sizeBytes   BigInt    @map("size_bytes")
+  sha256Hash  String    @map("sha256_hash") @db.Char(64)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6) /// soft delete only (record retention)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  owner        User          @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  app          AppRegistry   @relation(fields: [sourceApp], references: [appId], onDelete: Restrict)
+
+  @@index([ownerId, createdAt(sort: Desc)])
+  @@index([sourceApp, createdAt])
+  @@index([sha256Hash])
+  @@map("workspace_files")
+}
+
+// ------------------------------------------------- Public site content -------
+
+/// Scientific Advisory Board, managed from the /admin CMS and shown on
+/// /advisory-board and the homepage. Only rows with isPublished are public.
+/// Linking a platform account (userId) does not change its role; a SUPERADMIN
+/// grants ADVISORY_BOARD explicitly.
+model AdvisoryBoardMember {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug            String   @unique @db.VarChar(80)
+  honorific       String?  @db.VarChar(20) /// Dr., Prof.
+  fullName        String   @map("full_name") @db.VarChar(200)
+  credentials     String?  @db.VarChar(200) /// "M.Pharm, PhD, FIPS"
+  designation     String   @db.VarChar(200)
+  affiliation     String   @db.VarChar(300)
+  bio             String   @db.VarChar(5000)
+  photoUrl        String?  @map("photo_url") @db.VarChar(1024) /// https URL (R2 public bucket / CDN)
+  photoAlt        String?  @map("photo_alt") @db.VarChar(300)
+  specializations String[] @default([])
+  orcidId         String?  @map("orcid_id") @db.VarChar(19)
+  scholarUrl      String?  @map("scholar_url") @db.VarChar(500)
+  linkedinUrl     String?  @map("linkedin_url") @db.VarChar(500)
+  websiteUrl      String?  @map("website_url") @db.VarChar(500)
+  sortOrder       Int      @default(100) @map("sort_order") @db.SmallInt
+  isPublished     Boolean  @default(false) @map("is_published")
+  featured        Boolean  @default(false) /// shown in the homepage section
+  userId          String?  @unique @map("user_id") @db.Uuid
+  createdBy       String?  @map("created_by") @db.Uuid
+  updatedBy       String?  @map("updated_by") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([isPublished, sortOrder])
+  @@map("advisory_board_members")
+}
+
+/// Contact / sales / support enquiries (POST /v1/public/contact).
+model ContactMessage {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String        @db.VarChar(200)
+  email       String        @db.Citext
+  institution String?       @db.VarChar(300)
+  category    String        @db.VarChar(32) /// sales | institutional | support | billing | partnership | press | privacy | other
+  subject     String        @db.VarChar(200)
+  message     String        @db.VarChar(5000)
+  appId       String?       @map("app_id") @db.VarChar(32)
+  userId      String?       @map("user_id") @db.Uuid
+  ipAddress   String?       @map("ip_address") @db.Inet
+  userAgent   String?       @map("user_agent") @db.VarChar(512)
+  status      ContactStatus @default(NEW)
+  handledBy   String?       @map("handled_by") @db.Uuid
+  handledAt   DateTime?     @map("handled_at") @db.Timestamptz(6)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  app  AppRegistry? @relation(fields: [appId], references: [appId], onDelete: SetNull)
+  user User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([email])
+  @@map("contact_messages")
+}
+
+/// Append-only evidence of cookie / tracking consent (DPDPA 2023 s.6, GDPR
+/// Art. 7(1)). subjectId is the random id in the first-party consent cookie;
+/// the IP address is stored only as a peppered SHA-256 hash.
+model ConsentRecord {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subjectId     String        @map("subject_id") @db.Uuid
+  userId        String?       @map("user_id") @db.Uuid
+  policyVersion String        @map("policy_version") @db.VarChar(32)
+  action        ConsentAction
+  functional    Boolean       @default(false)
+  analytics     Boolean       @default(false)
+  marketing     Boolean       @default(false)
+  ipHash        String?       @map("ip_hash") @db.Char(64)
+  userAgent     String?       @map("user_agent") @db.VarChar(512)
+  source        String        @default("banner") @db.VarChar(32) /// banner | preferences | account
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([subjectId, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("consent_records")
+}
+
+// ------------------------------------------- Audit trail (21 CFR Part 11) ----
+
+/// Append-only, SHA-256 hash-chained. The BEFORE INSERT trigger assigns id,
+/// timestamp, previousHash and recordHash - any caller-supplied values for
+/// those columns are discarded. UPDATE / DELETE / TRUNCATE are revoked from
+/// the runtime role AND rejected by triggers. Verify with audit_verify_chain().
+model AuditLog {
+  /// BIGINT from sequence audit_logs_id_seq, assigned by the trigger while it
+  /// holds the chain-head lock so id order == chain order (the column default
+  /// 0 is only a placeholder that is always overwritten).
+  id           BigInt         @id @default(0)
+  timestamp    DateTime       @default(now()) @db.Timestamptz(6)
+  actorType    AuditActorType @default(USER) @map("actor_type")
+  actorId      String?        @map("actor_id") @db.Uuid
+  actorIp      String?        @map("actor_ip") @db.Inet
+  userAgent    String?        @map("user_agent") @db.VarChar(512)
+  appId        String         @default("core") @map("app_id") @db.VarChar(32)
+  eventType    String         @map("event_type") @db.VarChar(64)
+  resourceId   String?        @map("resource_id") @db.VarChar(255)
+  metadata     Json           @default("{}")
+  previousHash String         @default(dbgenerated("repeat('0'::text, 64)")) @map("previous_hash") @db.Char(64)
+  recordHash   String         @default(dbgenerated("repeat('0'::text, 64)")) @map("record_hash") @db.Char(64)
+
+  @@index([actorId, timestamp])
+  @@index([appId, timestamp])
+  @@index([eventType, timestamp])
+  @@index([resourceId])
+  @@index([timestamp], type: Brin, map: "audit_logs_timestamp_brin")
+  @@map("audit_logs")
+}
+
+/// Single-row chain head (id = 1). Written only by the audit trigger.
+model AuditChainHead {
+  id          Int      @id @default(1) @db.SmallInt
+  genesisHash String   @map("genesis_hash") @db.Char(64)
+  lastId      BigInt   @default(0) @map("last_id")
+  lastHash    String   @map("last_hash") @db.Char(64)
+  updatedAt   DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("audit_chain_head")
+}

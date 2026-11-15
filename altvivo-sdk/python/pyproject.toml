@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "altvivo-sso"
+version = "1.0.0"
+description = "AltVivo SSO for Django spokes: verifies the .altvivo.bio RS256 access-token cookie locally via JWKS"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+dependencies = [
+  "Django>=4.2",
+  "PyJWT[crypto]>=2.9,<3",
+]
+
+[project.optional-dependencies]
+# Instant cross-subdomain logout (reads core:revoked:* from Redis).
+redis = ["redis>=5,<6"]
+test = ["redis>=5,<6", "fakeredis>=2.26,<3"]
+
+[tool.setuptools.packages.find]
+include = ["altvivo_sso*"]
+
+[tool.setuptools.package-data]
+altvivo_sso = ["templates/altvivo_sso/*.html"]

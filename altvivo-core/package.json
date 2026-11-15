@@ -1,0 +1,57 @@
+{
+  "name": "@altvivo/core",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AltVivo central Identity Provider, SSO, billing and audit API (api.altvivo.bio)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.11"
+  },
+  "prisma": {
+    "schema": "db/schema.prisma",
+    "seed": "node db/seed/seed.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "cli:create-superadmin": "node dist/cli/create-superadmin.js",
+    "db:generate": "prisma generate",
+    "db:validate": "prisma validate",
+    "db:deploy": "node db/scripts/deploy.mjs",
+    "db:seed": "node db/seed/seed.ts",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:verify-audit": "node db/scripts/verify-audit.mjs",
+    "db:test": "node db/scripts/run-tests.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1160.0",
+    "@aws-sdk/s3-request-presigner": "3.1160.0",
+    "@fastify/cookie": "11.1.5",
+    "@fastify/cors": "11.3.1",
+    "@prisma/client": "5.22.0",
+    "argon2": "0.45.1",
+    "dejavu-fonts-ttf": "2.37.3",
+    "fastify": "5.12.7",
+    "fastify-plugin": "5.1.0",
+    "ioredis": "5.11.1",
+    "jose": "6.2.14",
+    "nodemailer": "10.3.1",
+    "otplib": "12.0.1",
+    "pdfkit": "0.20.2",
+    "pg": "8.13.1",
+    "prisma": "5.22.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/nodemailer": "8.0.2",
+    "@types/pdfkit": "0.17.7",
+    "@types/pg": "8.11.10",
+    "embedded-postgres": "16.14.0-beta.17",
+    "ioredis-mock": "8.13.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  }
+}

@@ -1,0 +1,19 @@
+# Stat 'O' Mate AI - Life Sciences Biostatistics Platform
+# Enable with: ./scripts/spoke-route.sh enable stat   (paid gate included)
+@stat host stat.altvivo.bio
+handle @stat {
+	request_body {
+		max_size 50MB
+	}
+	header {
+		defer
+		X-Frame-Options "SAMEORIGIN"
+		?Content-Security-Policy {env.SPOKE_CSP_DEFAULT}
+	}
+	route {
+		request_header -X-AltVivo-*
+		request_header -X-Internal-*
+		import paid_gate stat
+		import spoke_upstream stat:8000
+	}
+}

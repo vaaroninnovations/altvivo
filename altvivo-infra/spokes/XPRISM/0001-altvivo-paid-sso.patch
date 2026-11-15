@@ -1,0 +1,873 @@
+From 0f27a3747d60fa44ccaa671e9377afe9b7724d1a Mon Sep 17 00:00:00 2001
+From: AltVivo-Integration <integration@altvivo.invalid>
+Date: Sun, 15 Nov 2026 06:58:27 +0530
+Subject: [PATCH] AltVivo SSO with paid-entitlement gate; container image;
+ Django 5.2 LTS
+
+- lab/altvivo_sso_middleware.py: verifies the .altvivo.bio RS256 cookie via JWKS,
+  checks entitlements.xprism.active (SUPERADMIN / ADVISORY_BOARD bypass), Redis
+  revocation, syncs lab.User (new altvivo_sub field), injects <altvivo-topbar>
+- unauthenticated -> altvivo.bio/login?redirect=, unpaid -> /workspace/upgrade?app=xprism
+- local login/sign-up/password pages hand off to AltVivo; logout ends the central session
+- Resend inbound webhook and /healthz stay outside the gate
+- Dockerfile: python:3.12-slim, Gunicorn, WhiteNoise; Django 5.1 (EOL) -> 5.2 LTS
+- lab/tests_altvivo.py (12 tests, run with ALTVIVO_JWKS_URL set)
+---
+ .dockerignore                           |  13 +
+ Dockerfile                              |  39 ++
+ config/settings.py                      |  15 +
+ lab/altvivo_sso_middleware.py           | 480 ++++++++++++++++++++++++
+ lab/migrations/0013_user_altvivo_sub.py |  16 +
+ lab/models.py                           |   2 +
+ lab/tests_altvivo.py                    | 213 +++++++++++
+ requirements.txt                        |   5 +-
+ 8 files changed, 782 insertions(+), 1 deletion(-)
+ create mode 100644 .dockerignore
+ create mode 100644 Dockerfile
+ create mode 100644 lab/altvivo_sso_middleware.py
+ create mode 100644 lab/migrations/0013_user_altvivo_sub.py
+ create mode 100644 lab/tests_altvivo.py
+
+diff --git a/.dockerignore b/.dockerignore
+new file mode 100644
+index 0000000..f345fc7
+--- /dev/null
++++ b/.dockerignore
+@@ -0,0 +1,13 @@
++.git
++.env
++.env.*
++*.sqlite3
++staticfiles
++__pycache__
++*.pyc
++tests
++tools
++marketing
++node_modules
++Dockerfile
++.dockerignore
+diff --git a/Dockerfile b/Dockerfile
+new file mode 100644
+index 0000000..cfdc53c
+--- /dev/null
++++ b/Dockerfile
+@@ -0,0 +1,39 @@
++# syntax=docker/dockerfile:1.7
++# XPRISM - Django 5 CAL pharmacology simulator, served at xprism.altvivo.bio
++# behind Caddy (forward_auth paid gate) + lab/altvivo_sso_middleware.py.
++#
++#   docker compose build xprism            (from /opt/altvivo/altvivo-infra)
++#   docker build -t altvivo/xprism .       (standalone)
++ARG PYTHON_IMAGE=python:3.12.15-slim-trixie
++
++# ----------------------------------------------------------------- build ----
++FROM ${PYTHON_IMAGE} AS build
++ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONDONTWRITEBYTECODE=1
++WORKDIR /app
++COPY requirements.txt .
++RUN python -m venv /opt/venv && /opt/venv/bin/pip install --upgrade pip && /opt/venv/bin/pip install -r requirements.txt
++COPY . .
++# Static files are collected into the image and served by WhiteNoise
++# (URLs carry ?v=<mtime>, so they are cached for 30 days).
++RUN DJANGO_SECRET_KEY=build-only-not-a-secret DJANGO_STATIC_ROOT=/app/staticfiles \
++    /opt/venv/bin/python manage.py collectstatic --noinput --verbosity 0
++
++# --------------------------------------------------------------- runtime ----
++FROM ${PYTHON_IMAGE}
++RUN groupadd --system --gid 10001 xprism \
++ && useradd --system --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin xprism
++ENV PATH=/opt/venv/bin:$PATH \
++    PYTHONDONTWRITEBYTECODE=1 \
++    PYTHONUNBUFFERED=1 \
++    DJANGO_STATIC_ROOT=/app/staticfiles \
++    XPRISM_SERVE_STATIC=true
++WORKDIR /app
++# Code is root-owned and read-only to the service user.
++COPY --from=build /opt/venv /opt/venv
++COPY --from=build /app /app
++USER 10001:10001
++EXPOSE 8000
++HEALTHCHECK --interval=20s --timeout=5s --start-period=40s --retries=4 \
++  CMD python -c "import urllib.request as u,sys;r=u.Request('http://127.0.0.1:8000/healthz',headers={'Host':'xprism.altvivo.bio','X-Forwarded-Proto':'https'});sys.exit(0 if u.urlopen(r,timeout=4).status==200 else 1)"
++# Bind address, workers and timeouts come from GUNICORN_CMD_ARGS (compose).
++CMD ["gunicorn", "config.wsgi:application"]
+diff --git a/config/settings.py b/config/settings.py
+index 211f4b6..becf2dd 100644
+--- a/config/settings.py
++++ b/config/settings.py
+@@ -240,3 +240,18 @@ SHARED_DEMO_USERNAMES =[u.strip() for u in env('SHARED_DEMO_USERNAMES', 'xprismd
+ DATA_RETENTION_YEARS = int(env('DATA_RETENTION_YEARS', '3'))
+ LOGIN_MAX_FAILURES = 5
+ LOGIN_LOCK_MINUTES = 15
++
++
++# ------------------------------------------------------------------ containers & AltVivo SSO
++# Serve /assets/ from the app in a container (no nginx in front).
++if env_bool('XPRISM_SERVE_STATIC', False):
++    MIDDLEWARE.insert(MIDDLEWARE.index('django.middleware.security.SecurityMiddleware') + 1, 'whitenoise.middleware.WhiteNoiseMiddleware')
++    WHITENOISE_MAX_AGE = 30 * 24 * 3600   # asset URLs carry ?v=<mtime> (lab.storage)
++
++# AltVivo single sign-on + paid-entitlement gate (lab/altvivo_sso_middleware.py).
++# Off unless ALTVIVO_JWKS_URL is set, so local development behaves as before.
++ALTVIVO_SSO_ENABLED = bool(env('ALTVIVO_JWKS_URL'))
++if ALTVIVO_SSO_ENABLED:
++    MIDDLEWARE.insert(MIDDLEWARE.index('django.contrib.auth.middleware.AuthenticationMiddleware') + 1,
++                      'lab.altvivo_sso_middleware.AltVivoSSOMiddleware')
++    SITE_URL = env('ALTVIVO_PUBLIC_ORIGIN', SITE_URL)
+diff --git a/lab/altvivo_sso_middleware.py b/lab/altvivo_sso_middleware.py
+new file mode 100644
+index 0000000..5abc227
+--- /dev/null
++++ b/lab/altvivo_sso_middleware.py
+@@ -0,0 +1,480 @@
++"""AltVivo single sign-on and paid-entitlement gate for XPRISM.
++
++Active when ALTVIVO_JWKS_URL is set (config/settings.py). Layer 2 of the
++double gate: Caddy already calls altvivo-core's /v1/auth/verify?app=xprism
++before every request (layer 1); this middleware verifies the same
++`.altvivo.bio` access cookie locally so XPRISM never trusts the network alone.
++
++Per request (except exempt paths):
++  * `altvivo_at` is verified: RS256, issuer, expiry, JWKS key id, and the Redis
++    revocation list written by altvivo-core (instant cross-subdomain logout).
++  * Access requires `entitlements.xprism.active is True` (and an unexpired
++    `expires_at`), unless the role is in ALTVIVO_VIP_ROLES
++    (SUPERADMIN, ADVISORY_BOARD by default).
++  * Missing token  -> 302 https://altvivo.bio/login?redirect=<this URL>
++    Expired token  -> 302 https://api.altvivo.bio/v1/auth/refresh/bounce?next=<this URL>
++    Not paid       -> 302 https://altvivo.bio/workspace/upgrade?app=xprism&reason=subscription_required
++    (API / XHR callers get 401 / 403 JSON instead of redirects.)
++  * The AltVivo identity is synced to a local lab.User and signed in to the
++    Django session, so all existing XPRISM views keep working unchanged.
++  * XPRISM's own login, sign-up and password pages hand off to AltVivo; its
++    logout also ends the central AltVivo session.
++  * The shared <altvivo-topbar> is injected into every HTML page.
++"""
++from __future__ import annotations
++
++import datetime as dt
++import json
++import logging
++import os
++import re
++import threading
++import time
++import urllib.request
++from urllib.parse import urlencode
++
++import jwt
++from django.contrib.auth import login, logout
++from django.db import IntegrityError, transaction
++from django.http import HttpResponseRedirect, JsonResponse
++from django.utils import timezone
++
++log = logging.getLogger('altvivo')
++
++APP_ID = 'xprism'
++SESSION_SID = '_altvivo_sid'
++SESSION_SUB = '_altvivo_sub'
++SESSION_BOUNCE = '_altvivo_bounce_at'
++BOUNCE_LOOP_SECONDS = 20
++LOCAL_BACKEND = 'django.contrib.auth.backends.ModelBackend'
++
++
++def _env(name, default=''):
++    v = os.environ.get(name)
++    return default if v in (None, '') else v
++
++
++class Settings:
++    """Read once at import; values come from altvivo-infra/docker-compose.yml."""
++
++    jwks_url = _env('ALTVIVO_JWKS_URL')
++    issuer = _env('ALTVIVO_JWT_ISSUER', 'https://api.altvivo.bio')
++    cookie = _env('ALTVIVO_ACCESS_COOKIE', 'altvivo_at')
++    public_origin = _env('ALTVIVO_PUBLIC_ORIGIN', 'https://xprism.altvivo.bio').rstrip('/')
++    login_url = _env('ALTVIVO_LOGIN_URL', 'https://altvivo.bio/login')
++    register_url = _env('ALTVIVO_REGISTER_URL', 'https://altvivo.bio/register')
++    upgrade_url = _env('ALTVIVO_UPGRADE_URL', 'https://altvivo.bio/workspace/upgrade')
++    security_url = _env('ALTVIVO_SECURITY_URL', 'https://altvivo.bio/workspace/security')
++    logout_url = _env('ALTVIVO_LOGOUT_URL', 'https://altvivo.bio/logout')
++    bounce_url = _env('ALTVIVO_REFRESH_BOUNCE_URL', 'https://api.altvivo.bio/v1/auth/refresh/bounce')
++    api_url = _env('ALTVIVO_API_URL', 'https://api.altvivo.bio').rstrip('/')
++    home_url = _env('ALTVIVO_HOME_URL', 'https://altvivo.bio').rstrip('/')
++    embed_url = _env('ALTVIVO_EMBED_URL', 'https://embed.altvivo.bio/bar.js')
++    redis_url = _env('ALTVIVO_REDIS_URL')
++    redis_prefix = _env('ALTVIVO_REDIS_KEY_PREFIX', 'core:')
++    revocation_fail_open = _env('ALTVIVO_REVOCATION_FAIL_OPEN', 'true').lower() in ('1', 'true', 'yes')
++    vip_roles = frozenset(r.strip() for r in _env('ALTVIVO_VIP_ROLES', 'SUPERADMIN,ADVISORY_BOARD').split(',') if r.strip())
++    leeway = int(_env('ALTVIVO_LEEWAY_SECONDS', '5'))
++    jwks_ttl = int(_env('ALTVIVO_JWKS_CACHE_SECONDS', '300'))
++
++
++S = Settings
++
++# Never gated: health checks, static assets (gated at the edge by Caddy), and
++# the Resend inbound-mail webhook (authenticated by Resend's own signature).
++EXEMPT_PREFIXES = ('/healthz', '/assets/', '/favicon', '/robots.txt', '/api/resend/inbound')
++
++# XPRISM's own account pages that AltVivo now owns.
++HANDOFF = {
++    '/accounts/login/': 'login',
++    '/admin/login/': 'login',
++    '/accounts/signup/': 'register',
++    '/accounts/trial/': 'register',
++    '/accounts/password/reset/': 'security',
++    '/accounts/password/change/': 'security',
++}
++
++
++# ------------------------------------------------------------------- JWKS ---
++class JWKSCache:
++    """Refreshes every `ttl` s; refetches at most every 30 s on an unknown kid;
++    keeps the last good key set for 24 h if the IdP is unreachable."""
++
++    def __init__(self, url, ttl=300):
++        self.url, self.ttl = url, ttl
++        self._keys, self._fetched, self._attempt = {}, 0.0, 0.0
++        self._lock = threading.Lock()
++
++    def _fetch(self):
++        req = urllib.request.Request(self.url, headers={'Accept': 'application/json', 'User-Agent': 'xprism-altvivo-sso/1.0'})
++        with urllib.request.urlopen(req, timeout=3) as resp:  # noqa: S310 - URL from deployment config
++            doc = json.loads(resp.read().decode('utf-8'))
++        keys = {}
++        for k in doc.get('keys', []):
++            if k.get('kty') == 'RSA' and k.get('kid') and k.get('alg', 'RS256') == 'RS256' and k.get('use', 'sig') == 'sig':
++                keys[k['kid']] = jwt.PyJWK(k, algorithm='RS256').key
++        if not keys:
++            raise ValueError('JWKS has no usable RS256 keys')
++        return keys
++
++    def _refresh(self, force):
++        now = time.monotonic()
++        with self._lock:
++            if self._keys and not force and now - self._fetched < self.ttl:
++                return
++            if force and self._keys and now - self._attempt < 30:
++                return
++            self._attempt = now
++            try:
++                self._keys, self._fetched = self._fetch(), now
++            except Exception as exc:  # network, JSON or key errors
++                if self._keys and now - self._fetched < 24 * 3600:
++                    log.warning('JWKS refresh failed, using cached keys: %s', exc)
++                    return
++                raise
++
++    def key(self, kid):
++        self._refresh(False)
++        if kid not in self._keys:
++            self._refresh(True)
++        return self._keys[kid]
++
++
++_jwks = None
++_jwks_lock = threading.Lock()
++
++
++def _jwks_cache():
++    global _jwks
++    with _jwks_lock:
++        if _jwks is None or _jwks.url != S.jwks_url:
++            _jwks = JWKSCache(S.jwks_url, S.jwks_ttl)
++        return _jwks
++
++
++def reset_caches():
++    """For tests."""
++    global _jwks, _redis
++    with _jwks_lock:
++        _jwks = None
++    _redis = None
++
++
++class Expired(Exception):
++    pass
++
++
++class Invalid(Exception):
++    pass
++
++
++def verify(token):
++    """Verified claims dict, or raises Expired / Invalid."""
++    if not token or len(token) > 8192:
++        raise Invalid('missing token')
++    try:
++        header = jwt.get_unverified_header(token)
++    except jwt.PyJWTError as exc:
++        raise Invalid(str(exc)) from exc
++    if header.get('alg') != 'RS256' or not header.get('kid'):
++        raise Invalid('unexpected header')
++    try:
++        key = _jwks_cache().key(header['kid'])
++    except Exception as exc:
++        raise Invalid(f'no key for kid: {exc}') from exc
++    try:
++        claims = jwt.decode(token, key=key, algorithms=['RS256'], issuer=S.issuer, leeway=S.leeway,
++                            options={'require': ['exp', 'iat', 'sub', 'iss'], 'verify_aud': False})
++    except jwt.ExpiredSignatureError as exc:
++        raise Expired() from exc
++    except jwt.PyJWTError as exc:
++        raise Invalid(str(exc)) from exc
++    if not isinstance(claims.get('sid'), str) or not isinstance(claims.get('entitlements', {}), dict):
++        raise Invalid('malformed claims')
++    return claims
++
++
++# ------------------------------------------------------------- revocation ---
++_redis = None
++
++
++def _redis_client():
++    global _redis
++    if _redis is not None:
++        return _redis
++    if not S.redis_url:
++        return None
++    if _redis is None:
++        import redis
++
++        _redis = redis.Redis.from_url(S.redis_url, socket_timeout=0.5, socket_connect_timeout=0.5, decode_responses=True)
++    return _redis
++
++
++def set_redis(client):
++    """For tests, or to share an existing pool."""
++    global _redis
++    _redis = client
++
++
++def is_revoked(claims):
++    client = _redis_client()
++    if client is None:
++        return False
++    p = S.redis_prefix
++    try:
++        sid, before = client.mget(f"{p}revoked:sid:{claims['sid']}", f"{p}revoked:user:{claims['sub']}")
++    except Exception as exc:  # redis errors
++        log.warning('revocation check failed (%s): %s', 'allowing' if S.revocation_fail_open else 'denying', exc)
++        return not S.revocation_fail_open
++    if sid:
++        return True
++    try:
++        return before is not None and int(claims['iat']) < int(before)
++    except (TypeError, ValueError):
++        return False
++
++
++# ------------------------------------------------------------ entitlement ---
++def entitlement(claims):
++    """(allowed, expires_at_date_or_None, reason)."""
++    if claims.get('role') in S.vip_roles:
++        return True, None, 'vip'
++    ent = (claims.get('entitlements') or {}).get(APP_ID)
++    if not isinstance(ent, dict) or ent.get('active') is not True:
++        return False, None, 'subscription_required'
++    exp = ent.get('expires_at')
++    if exp is not None:
++        try:
++            exp = int(exp)
++        except (TypeError, ValueError):
++            return False, None, 'subscription_required'
++        if exp <= time.time():
++            return False, None, 'subscription_expired'
++        return True, dt.datetime.fromtimestamp(exp, tz=dt.timezone.utc).date(), 'paid'
++    return True, None, 'paid'
++
++
++# -------------------------------------------------------------- user sync ---
++def sync_user(claims, paid_until):
++    """Find or create the local XPRISM user for this AltVivo identity."""
++    from .models import Role, User
++
++    sub = str(claims['sub'])
++    email = str(claims.get('email') or '').lower()
++    verified = claims.get('email_verified') is True
++    user = User.objects.filter(altvivo_sub=sub).first()
++    if user is None:
++        with transaction.atomic():
++            candidate = None
++            if verified and email:
++                candidate = User.objects.filter(email__iexact=email, altvivo_sub__isnull=True).first()
++                # Link only accounts whose email XPRISM has verified too; never
++                # the public demo logins or anonymised accounts.
++                if candidate and not (candidate.email_verified and not candidate.is_shared_demo and not candidate.anonymised and candidate.is_active):
++                    candidate = None
++            if candidate is not None:
++                user = candidate
++                user.altvivo_sub = sub
++            else:
++                base = (email or f'altvivo-{sub}')[:150]
++                username, n = base, 1
++                while User.objects.filter(username=username).exists():
++                    n += 1
++                    username = f'{base[:140]}+av{n}'
++                first, _, last = str(claims.get('name') or '').partition(' ')
++                user = User(username=username, email=email, first_name=first[:150], last_name=last[:150],
++                            role=Role.STUDENT, altvivo_sub=sub, occupation=_occupation(claims.get('role')))
++                user.set_unusable_password()
++                if verified:
++                    user.email_verified, user.email_verified_at = True, timezone.now()
++            try:
++                user.save()
++            except IntegrityError:
++                user = User.objects.get(altvivo_sub=sub)
++        log.info('AltVivo %s linked to XPRISM user %s', sub, user.pk)
++
++    if not user.is_active:
++        return None
++    changed = []
++    # Paid AltVivo access is expressed through XPRISM's own field, so its
++    # existing has_full_access rules apply unchanged.
++    want = paid_until or (timezone.localdate() + dt.timedelta(days=1))
++    if user.subscribed_until != want:
++        user.subscribed_until = want
++        changed.append('subscribed_until')
++    if user.is_trial_account:
++        user.is_trial_account = False
++        changed.append('is_trial_account')
++    role = claims.get('role')
++    if role == 'SUPERADMIN' and claims.get('mfa') is True and user.role != Role.SUPERADMIN:
++        user.role = Role.SUPERADMIN
++        changed.append('role')
++    elif role != 'SUPERADMIN' and user.role == Role.SUPERADMIN and not user.has_usable_password() and not user.is_superuser:
++        user.role = Role.STUDENT  # promoted only through SSO: demote with the AltVivo role
++        changed.append('role')
++    if verified and not user.email_verified and user.email.lower() == email:
++        user.email_verified, user.email_verified_at = True, timezone.now()
++        changed += ['email_verified', 'email_verified_at']
++    if changed:
++        user.save(update_fields=changed + (['is_staff'] if 'role' in changed else []))
++    return user
++
++
++def _occupation(role):
++    return {'STUDENT': 'student', 'PI': 'faculty', 'INSTITUTE_ADMIN': 'faculty', 'ADVISORY_BOARD': 'faculty'}.get(role, 'researcher')
++
++
++# ---------------------------------------------------------------- helpers ---
++def _self_url(request):
++    return S.public_origin + request.get_full_path()
++
++
++def _wants_json(request):
++    accept = request.headers.get('Accept', '')
++    return (request.path.startswith('/api/') or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
++            or ('application/json' in accept and 'text/html' not in accept))
++
++
++def _redirect_or_json(request, url, status, error):
++    """API / XHR callers get JSON; page loads and form posts get a redirect."""
++    if _wants_json(request):
++        return JsonResponse({'error': error, 'redirect': url}, status=status)
++    return HttpResponseRedirect(url)
++
++
++def login_redirect(request):
++    return _redirect_or_json(request, f'{S.login_url}?{urlencode({"redirect": _self_url(request)})}', 401, 'unauthenticated')
++
++
++def upgrade_redirect(request, reason):
++    return _redirect_or_json(request, f'{S.upgrade_url}?{urlencode({"app": APP_ID, "reason": reason})}', 403, reason)
++
++
++def central_logout_url():
++    return f'{S.logout_url}?{urlencode({"next": S.public_origin + "/"})}'
++
++
++TOPBAR = None
++
++
++def _topbar_html():
++    global TOPBAR
++    if TOPBAR is None:
++        from django.utils.html import escape
++
++        TOPBAR = (f'<script src="{escape(S.embed_url)}" defer crossorigin="anonymous"></script>'
++                  f'<altvivo-topbar app="{APP_ID}" api="{escape(S.api_url)}" home="{escape(S.home_url)}"></altvivo-topbar>').encode()
++    return TOPBAR
++
++
++_BODY_RE = re.compile(rb'<body\b[^>]*>', re.IGNORECASE)
++
++
++# ------------------------------------------------------------- middleware ---
++class AltVivoSSOMiddleware:
++    """Place directly after django.contrib.auth.middleware.AuthenticationMiddleware."""
++
++    def __init__(self, get_response):
++        self.get_response = get_response
++        if not S.jwks_url:
++            raise RuntimeError('AltVivoSSOMiddleware needs ALTVIVO_JWKS_URL')
++        if not S.redis_url:
++            log.warning('ALTVIVO_REDIS_URL is not set: central sign-out reaches XPRISM only when the access token expires (<= 15 min)')
++
++    def __call__(self, request):
++        request.altvivo = None
++        path = request.path
++        if path.startswith(EXEMPT_PREFIXES):
++            return self.get_response(request)
++
++        handoff = HANDOFF.get(path)
++        if handoff:
++            target = request.GET.get('next') or '/'
++            back = S.public_origin + (target if target.startswith('/') and not target.startswith('//') else '/')
++            if handoff == 'security':
++                return HttpResponseRedirect(S.security_url)
++            base = S.login_url if handoff == 'login' else S.register_url
++            return HttpResponseRedirect(f'{base}?{urlencode({"redirect": back})}')
++
++        early = self._gate(request)
++        if early is not None:
++            return early
++
++        response = self.get_response(request)
++
++        match = getattr(request, 'resolver_match', None)
++        if match is not None and match.url_name == 'logout' and 300 <= response.status_code < 400:
++            return HttpResponseRedirect(central_logout_url())
++        return self._inject_topbar(response)
++
++    def _gate(self, request):
++        token = request.COOKIES.get(S.cookie)
++        claims, expired = None, False
++        if token:
++            try:
++                claims = verify(token)
++            except Expired:
++                expired = True
++            except Invalid as exc:
++                log.info('rejected AltVivo token: %s', exc)
++        if claims is not None and is_revoked(claims):
++            claims = None
++
++        if claims is None:
++            had_session = bool(request.session.get(SESSION_SID))
++            if request.user.is_authenticated:
++                logout(request)
++            if expired:
++                recently = time.time() - float(request.session.get(SESSION_BOUNCE, 0) or 0) < BOUNCE_LOOP_SECONDS
++                if not recently:
++                    if _wants_json(request):
++                        return JsonResponse({'error': 'session_expired', 'refreshUrl': f'{S.api_url}/v1/auth/refresh'}, status=401)
++                    request.session[SESSION_BOUNCE] = time.time()
++                    return HttpResponseRedirect(f'{S.bounce_url}?{urlencode({"next": _self_url(request)})}')
++            if had_session:
++                log.info('AltVivo session ended; signing out locally')
++            return login_redirect(request)
++
++        allowed, paid_until, reason = entitlement(claims)
++        if not allowed:
++            if request.user.is_authenticated:
++                logout(request)
++            return upgrade_redirect(request, reason)
++
++        user = sync_user(claims, paid_until)
++        if user is None:
++            return _redirect_or_json(request, f'{S.home_url}/workspace?{urlencode({"notice": "xprism_account_disabled"})}', 403, 'account_disabled')
++        if user.college_id and user.college and not user.college.is_active and not user.is_platform_admin:
++            return _redirect_or_json(request, f'{S.home_url}/workspace?{urlencode({"notice": "xprism_college_inactive"})}', 403, 'college_inactive')
++
++        if (not request.user.is_authenticated or request.user.pk != user.pk
++                or request.session.get(SESSION_SID) != claims['sid']):
++            login(request, user, backend=LOCAL_BACKEND)  # rotates the session key
++            request.session[SESSION_SID] = claims['sid']
++            request.session[SESSION_SUB] = claims['sub']
++            from .permissions import audit
++
++            audit(request, 'sso_login', user.username, altvivo_sub=claims['sub'], altvivo_session=claims['sid'],
++                  access=reason, plan=((claims.get('entitlements') or {}).get(APP_ID) or {}).get('plan'))
++        elif SESSION_BOUNCE in request.session:
++            del request.session[SESSION_BOUNCE]
++        request.altvivo = claims
++        return None
++
++    @staticmethod
++    def _inject_topbar(response):
++        ctype = response.get('Content-Type', '')
++        if (response.status_code != 200 or getattr(response, 'streaming', False) or 'text/html' not in ctype
++                or response.get('Content-Encoding')):
++            return response
++        body = response.content
++        if b'<altvivo-topbar' in body:
++            return response
++        m = _BODY_RE.search(body)
++        if not m:
++            return response
++        response.content = body[:m.end()] + _topbar_html() + body[m.end():]
++        if response.has_header('Content-Length'):
++            response['Content-Length'] = str(len(response.content))
++        return response
+diff --git a/lab/migrations/0013_user_altvivo_sub.py b/lab/migrations/0013_user_altvivo_sub.py
+new file mode 100644
+index 0000000..c9ab956
+--- /dev/null
++++ b/lab/migrations/0013_user_altvivo_sub.py
+@@ -0,0 +1,16 @@
++from django.db import migrations, models
++
++
++class Migration(migrations.Migration):
++
++    dependencies = [
++        ('lab', '0012_mail_closing'),
++    ]
++
++    operations = [
++        migrations.AddField(
++            model_name='user',
++            name='altvivo_sub',
++            field=models.CharField(blank=True, editable=False, max_length=64, null=True, unique=True, verbose_name='AltVivo account id'),
++        ),
++    ]
+diff --git a/lab/models.py b/lab/models.py
+index 2cf1fc7..f2b2669 100644
+--- a/lab/models.py
++++ b/lab/models.py
+@@ -63,6 +63,8 @@ class User(AbstractUser):
+     ethics_at = models.DateTimeField(null=True, blank=True)
+     email_verified = models.BooleanField(default=False)
+     email_verified_at = models.DateTimeField(null=True, blank=True)
++    # AltVivo identity (JWT `sub`) for single sign-on; set by lab.altvivo_sso_middleware.
++    altvivo_sub = models.CharField('AltVivo account id', max_length=64, unique=True, null=True, blank=True, editable=False)
+ 
+     @property
+     def display_name(self):
+diff --git a/lab/tests_altvivo.py b/lab/tests_altvivo.py
+new file mode 100644
+index 0000000..ba140e7
+--- /dev/null
++++ b/lab/tests_altvivo.py
+@@ -0,0 +1,213 @@
++"""Tests for lab/altvivo_sso_middleware.py (AltVivo SSO + paid gate).
++
++Run with SSO switched on; the tests write their own JWKS to that path:
++
++    ALTVIVO_JWKS_URL=file:///tmp/altvivo-jwks.json python manage.py test lab.tests_altvivo
++
++Skipped when ALTVIVO_JWKS_URL is not set. (With SSO on, every non-exempt
++page requires a paid AltVivo session, so run XPRISM's main suite without it.)
++"""
++import json
++import os
++import time
++import unittest
++import uuid
++from pathlib import Path
++from urllib.parse import parse_qs, urlparse
++from urllib.request import url2pathname
++
++from django.conf import settings
++from django.test import Client, TestCase, override_settings
++
++from .models import AuditLog, College, Role, User
++
++ENABLED = getattr(settings, 'ALTVIVO_SSO_ENABLED', False)
++HOST = 'xprism.altvivo.bio'
++
++if ENABLED:
++    import jwt
++    from cryptography.hazmat.primitives import serialization
++    from cryptography.hazmat.primitives.asymmetric import rsa
++
++    from . import altvivo_sso_middleware as sso
++
++    KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
++    PEM = KEY.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
++
++
++class FakeRedis:
++    def __init__(self):
++        self.store = {}
++
++    def mget(self, *keys):
++        return [self.store.get(k) for k in keys]
++
++
++def token(**over):
++    now = int(time.time())
++    claims = {
++        'sub': str(uuid.uuid4()), 'sid': str(uuid.uuid4()), 'email': 'priya@uni.edu.in', 'name': 'Priya Raman',
++        'role': 'RESEARCHER', 'org_id': None, 'tier': 'XPRISM_ANNUAL', 'email_verified': True, 'mfa': False,
++        'entitlements': {
++            'xprism': {'active': True, 'level': 'full', 'source': 'subscription', 'plan': 'xprism_annual', 'expires_at': now + 30 * 86400},
++            'amaze': {'active': False, 'level': 'none', 'source': None, 'plan': None, 'expires_at': None},
++        },
++        'iat': now, 'exp': now + 900, 'iss': 'https://api.altvivo.bio', 'jti': 'j',
++    }
++    claims.update(over)
++    return jwt.encode(claims, PEM, algorithm='RS256', headers={'kid': 'xprism-test'}), claims
++
++
++@unittest.skipUnless(ENABLED, 'ALTVIVO_JWKS_URL not set: AltVivo SSO disabled')
++@override_settings(ALLOWED_HOSTS=[HOST, 'testserver'], SECURE_SSL_REDIRECT=False)
++class AltVivoPaidGateTests(TestCase):
++    @classmethod
++    def setUpClass(cls):
++        super().setUpClass()
++        jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(KEY.public_key()))
++        path = Path(url2pathname(urlparse(os.environ['ALTVIVO_JWKS_URL']).path))
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_text(json.dumps({'keys': [{**jwk, 'kid': 'xprism-test', 'alg': 'RS256', 'use': 'sig'}]}))
++
++    def setUp(self):
++        sso.reset_caches()
++        self.redis = FakeRedis()
++        sso.set_redis(self.redis)
++        self.c = Client(HTTP_HOST=HOST)
++
++    def get(self, path, tok=None, json_api=False):
++        if tok is not None:
++            self.c.cookies['altvivo_at'] = tok
++        headers = {'HTTP_ACCEPT': 'application/json'} if json_api else {'HTTP_ACCEPT': 'text/html'}
++        return self.c.get(path, secure=True, **headers)
++
++    def uid(self):
++        return self.c.session.get('_auth_user_id')
++
++    # ------------------------------------------------------------------ --
++    def test_unauthenticated_is_sent_to_altvivo_login(self):
++        r = self.get('/modules/?x=1')
++        self.assertEqual(r.status_code, 302)
++        self.assertEqual(r['Location'], 'https://altvivo.bio/login?redirect=https%3A%2F%2Fxprism.altvivo.bio%2Fmodules%2F%3Fx%3D1')
++        api = self.get('/api/experiments/x/feedback', json_api=True)
++        self.assertEqual((api.status_code, api.json()['error']), (401, 'unauthenticated'))
++
++    def test_unpaid_is_sent_to_upgrade(self):
++        now = int(time.time())
++        cases = [
++            {'xprism': {'active': False, 'level': 'none', 'expires_at': None}},
++            {'xprism': {'active': True, 'level': 'full', 'expires_at': now - 10}},
++            {},
++            {'xprism': 'full'},  # legacy string shape is not a paid entitlement
++        ]
++        for ents in cases:
++            tok, _ = token(entitlements=ents)
++            r = self.get('/modules/', tok)
++            self.assertEqual(r.status_code, 302, ents)
++            q = parse_qs(urlparse(r['Location']).query)
++            self.assertEqual(r['Location'].split('?')[0], 'https://altvivo.bio/workspace/upgrade')
++            self.assertEqual(q['app'], ['xprism'])
++            self.assertIn(q['reason'][0], ('subscription_required', 'subscription_expired'))
++            self.assertIsNone(self.uid())
++
++    def test_paid_user_is_created_signed_in_and_has_full_access(self):
++        tok, claims = token()
++        r = self.get('/modules/', tok)
++        u = User.objects.get(pk=self.uid())
++        self.assertEqual((u.username, u.altvivo_sub, u.role, u.is_trial_account), ('priya@uni.edu.in', claims['sub'], Role.STUDENT, False))
++        self.assertFalse(u.has_usable_password())
++        self.assertTrue(u.has_full_access)
++        self.assertEqual(str(u.subscribed_until), time.strftime('%Y-%m-%d', time.gmtime(claims['entitlements']['xprism']['expires_at'])))
++        self.assertTrue(AuditLog.objects.filter(action='sso_login', target=u.username).exists())
++        # XPRISM's own policy gate still applies to new accounts.
++        self.assertEqual(r.status_code, 302)
++        self.assertIn('/consent', r['Location'])
++
++    def test_vip_roles_bypass_billing(self):
++        for role in ('SUPERADMIN', 'ADVISORY_BOARD'):
++            self.c = Client(HTTP_HOST=HOST)
++            tok, _ = token(role=role, mfa=True, email=f'{role.lower()}@altvivo.bio', entitlements={})
++            self.get('/modules/', tok)
++            u = User.objects.get(pk=self.uid())
++            self.assertTrue(u.has_full_access, role)
++        self.assertEqual(User.objects.get(email='superadmin@altvivo.bio').role, Role.SUPERADMIN)
++
++    def test_superadmin_requires_mfa_for_platform_admin_role(self):
++        tok, _ = token(role='SUPERADMIN', mfa=False, entitlements={})
++        self.get('/modules/', tok)
++        self.assertEqual(User.objects.get(pk=self.uid()).role, Role.STUDENT)
++
++    def test_expired_token_bounces_once_then_signs_in_again(self):
++        now = int(time.time())
++        tok, _ = token(iat=now - 2000, exp=now - 100)
++        r = self.get('/modules/', tok)
++        self.assertTrue(r['Location'].startswith('https://api.altvivo.bio/v1/auth/refresh/bounce?next=https%3A%2F%2Fxprism.altvivo.bio%2Fmodules%2F'))
++        again = self.get('/modules/', tok)
++        self.assertTrue(again['Location'].startswith('https://altvivo.bio/login?redirect='))
++
++    def test_revoked_session_is_rejected(self):
++        tok, claims = token()
++        self.get('/modules/', tok)
++        self.assertIsNotNone(self.uid())
++        self.redis.store[f"core:revoked:sid:{claims['sid']}"] = '1'
++        r = self.get('/modules/', tok)
++        self.assertTrue(r['Location'].startswith('https://altvivo.bio/login'))
++        self.assertIsNone(self.uid())
++
++    def test_forged_tokens_are_rejected(self):
++        other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
++        pem = other.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
++        _, claims = token()
++        forged = jwt.encode(claims, pem, algorithm='RS256', headers={'kid': 'xprism-test'})
++        hs = jwt.encode(claims, 'x' * 32, algorithm='HS256', headers={'kid': 'xprism-test'})
++        for t in (forged, hs, 'garbage', token(iss='https://evil.example')[0]):
++            r = self.get('/modules/', t)
++            self.assertTrue(r['Location'].startswith('https://altvivo.bio/login'), t[:15])
++
++    def test_links_only_verified_non_demo_accounts(self):
++        mine = User.objects.create_user('fac1', email='priya@uni.edu.in', password='Pw-123456789', role=Role.FACULTY, email_verified=True)
++        tok, _ = token()
++        self.get('/modules/', tok)
++        self.assertEqual(int(self.uid()), mine.pk)
++
++        loose = User.objects.create_user('stud9', email='ravi@uni.edu.in', password='Pw-123456789', email_verified=False)
++        self.c = Client(HTTP_HOST=HOST)
++        tok, _ = token(email='ravi@uni.edu.in')
++        self.get('/modules/', tok)
++        self.assertNotEqual(int(self.uid()), loose.pk)
++
++        demo = User.objects.create_user(settings.SHARED_DEMO_USERNAMES[0], email='demo@xprism.test', password='Pw-123456789', email_verified=True)
++        self.c = Client(HTTP_HOST=HOST)
++        tok, _ = token(email='demo@xprism.test')
++        self.get('/modules/', tok)
++        self.assertNotEqual(int(self.uid()), demo.pk)
++
++    def test_inactive_college_is_refused(self):
++        college = College.objects.create(name='Closed College', code='closed', is_active=False)
++        User.objects.create_user('closed-1', email='priya@uni.edu.in', password='Pw-123456789', college=college, email_verified=True)
++        tok, _ = token()
++        r = self.get('/modules/', tok)
++        self.assertIn('notice=xprism_college_inactive', r['Location'])
++
++    def test_local_account_pages_hand_off_to_altvivo(self):
++        r = self.get('/accounts/login/?next=/modules/')
++        self.assertEqual(r['Location'], 'https://altvivo.bio/login?redirect=https%3A%2F%2Fxprism.altvivo.bio%2Fmodules%2F')
++        self.assertEqual(self.get('/accounts/signup/')['Location'].split('?')[0], 'https://altvivo.bio/register')
++        self.assertEqual(self.get('/accounts/password/reset/')['Location'], 'https://altvivo.bio/workspace/security')
++        self.assertEqual(self.get('/admin/login/?next=/admin/')['Location'].split('?')[0], 'https://altvivo.bio/login')
++
++    def test_exempt_paths_and_logout_and_topbar(self):
++        self.assertEqual(self.get('/healthz').status_code, 200)
++        hook = self.c.post('/api/resend/inbound', {}, secure=True)  # webhook: never sent to the AltVivo login
++        self.assertFalse(hook.has_header('Location'))
++        tok, _ = token()
++        self.get('/modules/', tok)
++        u = User.objects.get(pk=self.uid())
++        u.consent_version = settings.POLICY_VERSION
++        u.save()
++        page = self.get('/modules/', tok)
++        self.assertEqual(page.status_code, 200)
++        self.assertContains(page, '<altvivo-topbar app="xprism" api="https://api.altvivo.bio" home="https://altvivo.bio">')
++        self.assertEqual(page.content.count(b'<altvivo-topbar'), 1)
++        r = self.c.post('/accounts/logout/', secure=True)
++        self.assertEqual(r['Location'], 'https://altvivo.bio/logout?next=https%3A%2F%2Fxprism.altvivo.bio%2F')
+diff --git a/requirements.txt b/requirements.txt
+index e17dea8..e06f5d1 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,4 +1,7 @@
+-Django>=5.1,<5.2
++Django>=5.2.8,<5.3
+ gunicorn>=22
+ psycopg[binary]>=3.1
+ openpyxl>=3.1
++whitenoise>=6.7,<7
++PyJWT[crypto]>=2.9,<3
++redis>=5,<6
+-- 
+2.56.0.windows.2
+

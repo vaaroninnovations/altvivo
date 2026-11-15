@@ -1,0 +1,725 @@
+# =============================================================================
+# AltVivo (altvivo.bio) - Production Docker Compose stack
+# -----------------------------------------------------------------------------
+# Topology
+#   Internet ──► Caddy (80/443 tcp, 443 udp)  ── the ONLY published ports
+#                  │  altvivo_net  (bridge, app tier, egress allowed)
+#                  ├── altvivo-web   (Next.js portal, :3000)
+#                  ├── altvivo-core  (IdP / SSO / billing API, :4000)
+#                  ├── xprism        (Django 5.2 spoke, :8000)        LIVE
+#                  └── amaze         (static SPA on nginx, :8080)     LIVE
+#                  altvivo_data (bridge, internal: true - NO egress, NO ingress)
+#                  ├── postgres 16
+#                  └── redis 7
+#
+# Phase-2 spokes (pharmadme, stat, phytonet, mira) are commented out at the
+# bottom of this file. Until enabled, Caddy routes their subdomains to the
+# altvivo-web "Launching Soon" page (see caddy/coming-soon.caddy).
+#
+# Usage (from this directory on the VPS):
+#   sudo ./scripts/generate-secrets.sh        # once
+#   docker compose build
+#   docker compose up -d
+# =============================================================================
+
+name: altvivo
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+    tag: "{{.Name}}"
+
+# Baseline hardening applied to every long-running container.
+x-hardening: &hardening
+  restart: unless-stopped
+  init: true
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  logging: *default-logging
+
+# Shared SSO configuration consumed by every spoke's AltVivo SDK middleware.
+x-spoke-sso-env: &spoke-sso-env
+  ALTVIVO_JWKS_URL: http://altvivo-core:4000/.well-known/jwks.json
+  ALTVIVO_JWT_ISSUER: https://api.altvivo.bio
+  ALTVIVO_JWT_ALGORITHMS: RS256
+  ALTVIVO_ACCESS_COOKIE: altvivo_at
+  ALTVIVO_CSRF_COOKIE: altvivo_csrf
+  ALTVIVO_LOGIN_URL: https://altvivo.bio/login
+  ALTVIVO_REGISTER_URL: https://altvivo.bio/register
+  ALTVIVO_UPGRADE_URL: https://altvivo.bio/workspace/upgrade
+  ALTVIVO_SECURITY_URL: https://altvivo.bio/workspace/security
+  ALTVIVO_LOGOUT_URL: https://altvivo.bio/logout
+  ALTVIVO_REFRESH_BOUNCE_URL: https://api.altvivo.bio/v1/auth/refresh/bounce
+  ALTVIVO_API_URL: https://api.altvivo.bio
+  ALTVIVO_HOME_URL: https://altvivo.bio
+  ALTVIVO_VIP_ROLES: SUPERADMIN,ADVISORY_BOARD
+  ALTVIVO_CORE_INTERNAL_URL: http://altvivo-core:4000
+  ALTVIVO_EMBED_URL: https://embed.altvivo.bio/bar.js
+  ALTVIVO_JWKS_CACHE_SECONDS: "300"
+  TZ: ${TZ:-UTC}
+
+services:
+  # ---------------------------------------------------------------------------
+  # Edge: Caddy reverse proxy (wildcard TLS via Cloudflare DNS-01)
+  # ---------------------------------------------------------------------------
+  caddy:
+    <<: *hardening
+    build:
+      context: ./caddy
+      args:
+        CADDY_VERSION: ${CADDY_VERSION:-2.10.0}
+    image: altvivo/caddy:${CADDY_VERSION:-2.10.0}
+    container_name: altvivo-caddy
+    user: "10001:10001"
+    # Lets the non-root Caddy user bind 80/443 inside its own network namespace
+    # without file capabilities (compatible with no-new-privileges).
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: "0"
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+      - "443:443/udp" # HTTP/3 (QUIC)
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
+      ACME_CA: ${ACME_CA:-https://acme-v02.api.letsencrypt.org/directory}
+      CF_API_TOKEN: ${CF_API_TOKEN:?CF_API_TOKEN (Cloudflare Zone.DNS:Edit token) is required}
+      SPOKE_CSP_XPRISM: ${SPOKE_CSP_XPRISM:?SPOKE_CSP_XPRISM is required}
+      SPOKE_CSP_AMAZE: ${SPOKE_CSP_AMAZE:?SPOKE_CSP_AMAZE is required}
+      SPOKE_CSP_DEFAULT: ${SPOKE_CSP_DEFAULT:?SPOKE_CSP_DEFAULT is required}
+      WEB_CSP_FALLBACK: ${WEB_CSP_FALLBACK:?WEB_CSP_FALLBACK is required}
+      TZ: ${TZ:-UTC}
+    volumes:
+      # Whole directory (not single files) so in-place route edits made by
+      # scripts/spoke-route.sh are visible to `caddy reload`.
+      - ./caddy:/etc/caddy:ro
+      - ${EMBED_DIST_DIR:-./embed/dist}:/srv/embed:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    networks:
+      - altvivo_net
+    depends_on:
+      altvivo-web:
+        condition: service_started
+      altvivo-core:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+
+  # ---------------------------------------------------------------------------
+  # Data tier
+  # ---------------------------------------------------------------------------
+  postgres:
+    <<: *hardening
+    image: postgres:16.4-alpine3.20
+    container_name: altvivo-postgres
+    user: "70:70" # 'postgres' user in the alpine image
+    shm_size: 256m
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-altvivo_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?POSTGRES_SUPERUSER_PASSWORD is required}
+      POSTGRES_DB: postgres
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=trust --data-checksums --encoding=UTF8 --locale=C"
+      PGDATA: /var/lib/postgresql/data/pgdata
+      # Consumed only by postgres/initdb/init-multi-db.sh on first boot.
+      CORE_MIGRATOR_PASSWORD: ${CORE_MIGRATOR_PASSWORD:?CORE_MIGRATOR_PASSWORD is required}
+      CORE_APP_PASSWORD: ${CORE_APP_PASSWORD:?CORE_APP_PASSWORD is required}
+      CORE_READONLY_PASSWORD: ${CORE_READONLY_PASSWORD:?CORE_READONLY_PASSWORD is required}
+      SPOKE_DATABASES: ${SPOKE_DATABASES:-xprism}
+      XPRISM_DB_PASSWORD: ${XPRISM_DB_PASSWORD:?XPRISM_DB_PASSWORD is required}
+      TZ: UTC
+    command:
+      - postgres
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - listen_addresses=*
+      - -c
+      - max_connections=${PG_MAX_CONNECTIONS:-200}
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-512MB}
+      - -c
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-1536MB}
+      - -c
+      - work_mem=${PG_WORK_MEM:-8MB}
+      - -c
+      - maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-128MB}
+      - -c
+      - wal_level=replica
+      - -c
+      - max_wal_size=2GB
+      - -c
+      - idle_in_transaction_session_timeout=60s
+      - -c
+      - log_connections=on
+      - -c
+      - log_disconnections=on
+      - -c
+      - log_min_duration_statement=1000
+      - -c
+      - log_line_prefix=%m [%p] %q%u@%d %r
+      - -c
+      - log_statement=ddl
+      - -c
+      - timezone=UTC
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/run/postgresql:size=8m,mode=1777
+    networks:
+      altvivo_data:
+        ipv4_address: 172.30.10.10
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h /var/run/postgresql -U \"$${POSTGRES_USER}\" -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+
+  redis:
+    <<: *hardening
+    image: redis:7.4.1-alpine3.20
+    container_name: altvivo-redis
+    user: "999:1000" # 'redis' user in the alpine image
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - ./secrets/redis/users.acl:/usr/local/etc/redis/users.acl:ro
+      - redis_data:/data
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    networks:
+      altvivo_data:
+        ipv4_address: 172.30.10.11
+    healthcheck:
+      # 'default' user is disabled, so an unauthenticated PING returning NOAUTH
+      # proves the server is up and enforcing ACLs.
+      test: ["CMD-SHELL", "redis-cli -h 127.0.0.1 ping 2>&1 | grep -qE 'PONG|NOAUTH'"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+
+  # ---------------------------------------------------------------------------
+  # Hub: central Identity Provider / SSO / billing / ledger / audit API
+  # ---------------------------------------------------------------------------
+  altvivo-core-migrate:
+    image: ${CORE_IMAGE:-altvivo/core:latest}
+    build:
+      context: ${CORE_BUILD_CONTEXT:-../altvivo-core}
+    container_name: altvivo-core-migrate
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "10001:10001"
+    logging: *default-logging
+    # Same as `npm run db:deploy`; invoked directly because npm writes to $HOME,
+    # which is read-only here. Migrations -> seed -> genesis check -> audit event.
+    command: ["node", "db/scripts/deploy.mjs"]
+    environment:
+      NODE_ENV: production
+      # DDL is executed as the schema owner; runtime uses the restricted role.
+      DATABASE_URL: postgresql://core_migrator:${CORE_MIGRATOR_PASSWORD}@postgres:5432/db_core?schema=public
+      AUDIT_CHAIN_GENESIS: ${AUDIT_CHAIN_GENESIS:?AUDIT_CHAIN_GENESIS is required}
+      PRISMA_HIDE_UPDATE_MESSAGE: "1"
+      CHECKPOINT_DISABLE: "1"
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    networks:
+      - altvivo_data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  altvivo-core:
+    <<: *hardening
+    image: ${CORE_IMAGE:-altvivo/core:latest}
+    build:
+      context: ${CORE_BUILD_CONTEXT:-../altvivo-core}
+    container_name: altvivo-core
+    user: "10001:10001"
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-UTC}
+      PORT: "4000"
+      HOST: 0.0.0.0
+      LOG_LEVEL: ${CORE_LOG_LEVEL:-info}
+      # Only Caddy (on the app subnet) may assert the client IP via X-Real-IP.
+      TRUSTED_PROXY_CIDRS: ${APP_SUBNET:-172.30.0.0/24}
+      PUBLIC_API_URL: https://api.altvivo.bio
+      PUBLIC_WEB_URL: https://altvivo.bio
+      ALLOWED_ORIGINS: https://altvivo.bio,https://xprism.altvivo.bio,https://amaze.altvivo.bio,https://pharmadme.altvivo.bio,https://stat.altvivo.bio,https://phytonet.altvivo.bio,https://mira.altvivo.bio
+      COOKIE_DOMAIN: .altvivo.bio
+      DATABASE_URL: postgresql://core_app:${CORE_APP_PASSWORD}@postgres:5432/db_core?schema=public&connection_limit=${CORE_DB_POOL_SIZE:-20}
+      REDIS_URL: redis://core:${REDIS_CORE_PASSWORD}@redis:6379/0
+      REDIS_KEY_PREFIX: "core:"
+      JWT_ISSUER: https://api.altvivo.bio
+      JWT_KID: ${JWT_KID:?JWT_KID is required}
+      JWT_PRIVATE_KEY_FILE: /run/secrets/jwt_private_key
+      JWT_PUBLIC_KEY_FILE: /run/secrets/jwt_public_key
+      JWT_PREVIOUS_PUBLIC_KEY_FILE: /run/secrets/jwt_previous_public_key
+      ACCESS_TOKEN_TTL_SECONDS: "900"
+      REFRESH_TOKEN_TTL_SECONDS: "604800"
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?MFA_ENCRYPTION_KEY is required}
+      CSRF_SECRET: ${CSRF_SECRET:?CSRF_SECRET is required}
+      REFRESH_TOKEN_PEPPER: ${REFRESH_TOKEN_PEPPER:?REFRESH_TOKEN_PEPPER is required}
+      AUDIT_CHAIN_GENESIS: ${AUDIT_CHAIN_GENESIS:?AUDIT_CHAIN_GENESIS is required}
+      SPOKE_SERVICE_TOKENS: xprism:${XPRISM_SERVICE_TOKEN:?XPRISM_SERVICE_TOKEN is required}
+      PAID_GATE_VIP_ROLES: SUPERADMIN,ADVISORY_BOARD
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      ORCID_CLIENT_ID: ${ORCID_CLIENT_ID:-}
+      ORCID_CLIENT_SECRET: ${ORCID_CLIENT_SECRET:-}
+      ORCID_BASE_URL: ${ORCID_BASE_URL:-https://orcid.org}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:?TURNSTILE_SECRET_KEY is required}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?R2_ACCOUNT_ID is required}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID is required}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY is required}
+      R2_BUCKET_VAULT: ${R2_BUCKET_VAULT:-altvivo-vault}
+      R2_BUCKET_UPLOADS: ${R2_BUCKET_UPLOADS:-altvivo-uploads}
+      R2_PRESIGN_TTL_SECONDS: ${R2_PRESIGN_TTL_SECONDS:-300}
+      SMTP_HOST: ${SMTP_HOST:?SMTP_HOST is required}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-AltVivo <no-reply@altvivo.bio>}
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:-support@altvivo.bio}
+      # Advisory-board portraits (public R2 bucket behind a CDN); empty = paste URLs instead.
+      R2_BUCKET_PUBLIC: ${R2_BUCKET_PUBLIC:-}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-}
+      # Seller identity on GST invoices. Checkout and proformas stay disabled until set.
+      SELLER_LEGAL_NAME: ${SELLER_LEGAL_NAME:-}
+      SELLER_TRADE_NAME: ${SELLER_TRADE_NAME:-AltVivo}
+      SELLER_GSTIN: ${SELLER_GSTIN:-}
+      SELLER_PAN: ${SELLER_PAN:-}
+      SELLER_ADDRESS: ${SELLER_ADDRESS:-}
+      SELLER_STATE_CODE: ${SELLER_STATE_CODE:-}
+      SELLER_EMAIL: ${SELLER_EMAIL:-billing@altvivo.bio}
+      SELLER_PHONE: ${SELLER_PHONE:-}
+      SELLER_LUT_REFERENCE: ${SELLER_LUT_REFERENCE:-}
+      SELLER_BANK_NAME: ${SELLER_BANK_NAME:-}
+      SELLER_BANK_ACCOUNT_NAME: ${SELLER_BANK_ACCOUNT_NAME:-}
+      SELLER_BANK_ACCOUNT_NUMBER: ${SELLER_BANK_ACCOUNT_NUMBER:-}
+      SELLER_BANK_IFSC: ${SELLER_BANK_IFSC:-}
+      SELLER_BANK_BRANCH: ${SELLER_BANK_BRANCH:-}
+      PROFORMA_VALIDITY_DAYS: ${PROFORMA_VALIDITY_DAYS:-30}
+    secrets:
+      - jwt_private_key
+      - jwt_public_key
+      - jwt_previous_public_key
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    networks:
+      - altvivo_net
+      - altvivo_data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      altvivo-core-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1G
+
+  # ---------------------------------------------------------------------------
+  # Hub: public portal + /workspace App Launcher (Next.js standalone)
+  # ---------------------------------------------------------------------------
+  altvivo-web:
+    <<: *hardening
+    image: ${WEB_IMAGE:-altvivo/web:latest}
+    build:
+      context: ${WEB_BUILD_CONTEXT:-../altvivo-web}
+      args:
+        NEXT_PUBLIC_API_URL: https://api.altvivo.bio
+        NEXT_PUBLIC_SITE_URL: https://altvivo.bio
+        NEXT_PUBLIC_EMBED_URL: https://embed.altvivo.bio/bar.js
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:?TURNSTILE_SITE_KEY is required}
+        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+        NEXT_PUBLIC_RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+    container_name: altvivo-web
+    user: "10001:10001"
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-UTC}
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      NEXT_TELEMETRY_DISABLED: "1"
+      CORE_INTERNAL_URL: http://altvivo-core:4000
+      JWKS_INTERNAL_URL: http://altvivo-core:4000/.well-known/jwks.json
+      JWT_ISSUER: https://api.altvivo.bio
+      # Legal identity printed in /privacy, /terms, /cookies and /contact (read per request).
+      LEGAL_ENTITY_NAME: ${LEGAL_ENTITY_NAME:-${SELLER_LEGAL_NAME:-Aaron Innovations}}
+      LEGAL_REGISTERED_ADDRESS: ${LEGAL_REGISTERED_ADDRESS:-${SELLER_ADDRESS:-}}
+      LEGAL_CIN: ${LEGAL_CIN:-}
+      LEGAL_PRIVACY_EMAIL: ${LEGAL_PRIVACY_EMAIL:-privacy@altvivo.bio}
+      LEGAL_SALES_EMAIL: ${LEGAL_SALES_EMAIL:-sales@altvivo.bio}
+      LEGAL_GRIEVANCE_OFFICER_NAME: ${LEGAL_GRIEVANCE_OFFICER_NAME:-}
+      LEGAL_GRIEVANCE_OFFICER_EMAIL: ${LEGAL_GRIEVANCE_OFFICER_EMAIL:-grievance@altvivo.bio}
+      LEGAL_GRIEVANCE_OFFICER_PHONE: ${LEGAL_GRIEVANCE_OFFICER_PHONE:-}
+      LEGAL_JURISDICTION_CITY: ${LEGAL_JURISDICTION_CITY:-Bengaluru}
+      SELLER_TRADE_NAME: ${SELLER_TRADE_NAME:-AltVivo}
+      SELLER_GSTIN: ${SELLER_GSTIN:-}
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:-support@altvivo.bio}
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /app/.next/cache:size=256m,mode=1777
+    networks:
+      - altvivo_net
+    depends_on:
+      altvivo-core:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1G
+
+  # ---------------------------------------------------------------------------
+  # Phase-1 LIVE spoke: XPRISM (Django 5.2 LTS + Gunicorn) - xprism.altvivo.bio
+  # /opt/altvivo/XPRISM = vaaroninnovations/XPRISM + spokes/XPRISM/*.patch.
+  # Gated twice: Caddy forward_auth (/v1/auth/verify?app=xprism) and
+  # lab/altvivo_sso_middleware.py (local JWKS check of entitlements.xprism).
+  # ---------------------------------------------------------------------------
+  xprism-migrate:
+    image: ${XPRISM_IMAGE:-altvivo/xprism:latest}
+    build:
+      context: ${XPRISM_DIR:-../XPRISM}
+    container_name: altvivo-xprism-migrate
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "10001:10001"
+    logging: *default-logging
+    command: ["sh", "-c", "python manage.py migrate --noinput && python manage.py createcachetable"]
+    env_file:
+      - path: ./env/xprism.env    # XPRISM's own settings (email, legal, SEO, mailbox); optional
+        required: false
+    environment: &xprism-env
+      <<: *spoke-sso-env
+      ALTVIVO_APP_ID: xprism
+      ALTVIVO_PUBLIC_ORIGIN: https://xprism.altvivo.bio
+      ALTVIVO_SERVICE_TOKEN: ${XPRISM_SERVICE_TOKEN}
+      ALTVIVO_REDIS_URL: redis://xprism:${REDIS_XPRISM_PASSWORD:?REDIS_XPRISM_PASSWORD is required}@redis:6379/0
+      DJANGO_SECRET_KEY: ${XPRISM_DJANGO_SECRET_KEY:?XPRISM_DJANGO_SECRET_KEY is required}
+      DJANGO_ALLOWED_HOSTS: xprism.altvivo.bio
+      DJANGO_CSRF_TRUSTED_ORIGINS: https://xprism.altvivo.bio
+      DJANGO_SECURE_COOKIES: "true"
+      DJANGO_SSL_REDIRECT: "false"   # Caddy redirects and sets HSTS
+      DJANGO_HSTS_SECONDS: "0"
+      DJANGO_LOG_LEVEL: ${XPRISM_LOG_LEVEL:-WARNING}
+      SITE_URL: https://xprism.altvivo.bio
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: xprism
+      POSTGRES_USER: xprism
+      POSTGRES_PASSWORD: ${XPRISM_DB_PASSWORD}
+      XPRISM_SERVE_STATIC: "true"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    networks:
+      - altvivo_data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  xprism:
+    <<: *hardening
+    image: ${XPRISM_IMAGE:-altvivo/xprism:latest}
+    container_name: altvivo-xprism
+    user: "10001:10001"
+    env_file:
+      - path: ./env/xprism.env
+        required: false
+    environment:
+      <<: *xprism-env
+      GUNICORN_CMD_ARGS: "--bind=0.0.0.0:8000 --workers=${XPRISM_WORKERS:-3} --threads=2 --timeout=120 --graceful-timeout=30 --max-requests=2000 --max-requests-jitter=200 --forwarded-allow-ips=* --worker-tmp-dir=/tmp"
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    networks:
+      - altvivo_net
+      - altvivo_data
+    depends_on:
+      xprism-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      altvivo-core:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request as u,sys;r=u.Request('http://127.0.0.1:8000/healthz',headers={'Host':'xprism.altvivo.bio','X-Forwarded-Proto':'https'});sys.exit(0 if u.urlopen(r,timeout=4).status==200 else 1)"
+      interval: 20s
+      timeout: 5s
+      retries: 4
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1536M
+
+  # ---------------------------------------------------------------------------
+  # Phase-1 LIVE spoke: aMaze (static React SPA, nginx :8080) - amaze.altvivo.bio
+  # /opt/altvivo/aMaze = vaaroninnovations/aMaze + spokes/aMaze/*.patch.
+  # No server of its own: Caddy forward_auth admits only users with an active
+  # aMaze entitlement (every page and asset); identity, credits and the
+  # contact form are served by altvivo-core.
+  # ---------------------------------------------------------------------------
+  amaze:
+    <<: *hardening
+    image: ${AMAZE_IMAGE:-altvivo/amaze:latest}
+    build:
+      context: ${AMAZE_DIR:-../aMaze}
+      args:
+        VITE_ALTVIVO_API_URL: https://api.altvivo.bio
+        VITE_ALTVIVO_HOME_URL: https://altvivo.bio
+        VITE_TRACKING_API_URL: ${AMAZE_TRACKING_API_URL:-}
+    container_name: altvivo-amaze
+    user: "101:101"   # nginx-unprivileged
+    tmpfs:
+      - /tmp:size=32m,mode=1777   # nginx pid + temp paths (read-only root)
+    networks:
+      - altvivo_net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 20s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+  # ===========================================================================
+  # PHASE-2 PLUG-AND-PLAY SPOKES (disabled)
+  # ---------------------------------------------------------------------------
+  # To launch a spoke (example: pharmadme):
+  #   1. Add its secrets to .env (PHARMADME_DB_PASSWORD, REDIS_PHARMADME_PASSWORD,
+  #      PHARMADME_SERVICE_TOKEN) - `sudo ./scripts/generate-secrets.sh --spoke pharmadme`
+  #   2. ./scripts/provision-spoke-db.sh pharmadme      (role + database)
+  #   3. Append ",pharmadme:${PHARMADME_SERVICE_TOKEN}" to SPOKE_SERVICE_TOKENS
+  #      on altvivo-core above.
+  #   4. Uncomment the service block below and `docker compose up -d pharmadme`.
+  #   5. ./scripts/spoke-route.sh enable pharmadme       (Caddy upstream, hot reload)
+  #   6. Flip app_registry.status to BETA/LIVE in /workspace/admin/apps.
+  # Until step 5, Caddy keeps serving the "Launching Soon" page for that host.
+  # ===========================================================================
+
+  # pharmadme:
+  #   <<: *hardening
+  #   image: ${PHARMADME_IMAGE:-altvivo/pharmadme:latest}
+  #   build:
+  #     context: ${PHARMADME_BUILD_CONTEXT:-../spokes/pharmadme}
+  #   container_name: altvivo-pharmadme
+  #   user: "10001:10001"
+  #   environment:
+  #     <<: *spoke-sso-env
+  #     ALTVIVO_APP_ID: pharmadme
+  #     ALTVIVO_SERVICE_TOKEN: ${PHARMADME_SERVICE_TOKEN}
+  #     PORT: "8000"
+  #     DATABASE_URL: postgres://pharmadme:${PHARMADME_DB_PASSWORD}@postgres:5432/pharmadme
+  #     REDIS_URL: redis://pharmadme:${REDIS_PHARMADME_PASSWORD}@redis:6379/0
+  #     REDIS_KEY_PREFIX: "pharmadme:"
+  #   tmpfs:
+  #     - /tmp:size=256m,mode=1777
+  #   networks: [altvivo_net, altvivo_data]
+  #   depends_on:
+  #     altvivo-core:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD", "python", "-c", "import urllib.request as u,sys;r=u.Request('http://127.0.0.1:8000/altvivo/healthz',headers={'Host':'pharmadme.altvivo.bio','X-Forwarded-Proto':'https'});sys.exit(0 if u.urlopen(r,timeout=4).status==200 else 1)"]
+  #     interval: 20s
+  #     timeout: 5s
+  #     retries: 4
+  #   deploy:
+  #     resources:
+  #       limits: {cpus: "2.0", memory: 2G}
+
+  # stat:
+  #   <<: *hardening
+  #   image: ${STAT_IMAGE:-altvivo/stat:latest}
+  #   build:
+  #     context: ${STAT_BUILD_CONTEXT:-../spokes/stat}
+  #   container_name: altvivo-stat
+  #   user: "10001:10001"
+  #   environment:
+  #     <<: *spoke-sso-env
+  #     ALTVIVO_APP_ID: stat
+  #     ALTVIVO_SERVICE_TOKEN: ${STAT_SERVICE_TOKEN}
+  #     PORT: "8000"
+  #     DATABASE_URL: postgres://stat:${STAT_DB_PASSWORD}@postgres:5432/stat
+  #     REDIS_URL: redis://stat:${REDIS_STAT_PASSWORD}@redis:6379/0
+  #     REDIS_KEY_PREFIX: "stat:"
+  #   tmpfs:
+  #     - /tmp:size=256m,mode=1777
+  #   networks: [altvivo_net, altvivo_data]
+  #   depends_on:
+  #     altvivo-core:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD", "python", "-c", "import urllib.request as u,sys;r=u.Request('http://127.0.0.1:8000/altvivo/healthz',headers={'Host':'stat.altvivo.bio','X-Forwarded-Proto':'https'});sys.exit(0 if u.urlopen(r,timeout=4).status==200 else 1)"]
+  #     interval: 20s
+  #     timeout: 5s
+  #     retries: 4
+  #   deploy:
+  #     resources:
+  #       limits: {cpus: "2.0", memory: 2G}
+
+  # phytonet:
+  #   <<: *hardening
+  #   image: ${PHYTONET_IMAGE:-altvivo/phytonet:latest}
+  #   build:
+  #     context: ${PHYTONET_BUILD_CONTEXT:-../spokes/phytonet}
+  #   container_name: altvivo-phytonet
+  #   user: "10001:10001"
+  #   environment:
+  #     <<: *spoke-sso-env
+  #     ALTVIVO_APP_ID: phytonet
+  #     ALTVIVO_SERVICE_TOKEN: ${PHYTONET_SERVICE_TOKEN}
+  #     PORT: "8000"
+  #     DATABASE_URL: postgres://phytonet:${PHYTONET_DB_PASSWORD}@postgres:5432/phytonet
+  #     REDIS_URL: redis://phytonet:${REDIS_PHYTONET_PASSWORD}@redis:6379/0
+  #     REDIS_KEY_PREFIX: "phytonet:"
+  #   tmpfs:
+  #     - /tmp:size=1g,mode=1777   # docking scratch space
+  #   networks: [altvivo_net, altvivo_data]
+  #   depends_on:
+  #     altvivo-core:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD", "python", "-c", "import urllib.request as u,sys;r=u.Request('http://127.0.0.1:8000/altvivo/healthz',headers={'Host':'phytonet.altvivo.bio','X-Forwarded-Proto':'https'});sys.exit(0 if u.urlopen(r,timeout=4).status==200 else 1)"]
+  #     interval: 20s
+  #     timeout: 5s
+  #     retries: 4
+  #   deploy:
+  #     resources:
+  #       limits: {cpus: "4.0", memory: 4G}
+
+  # mira:
+  #   <<: *hardening
+  #   image: ${MIRA_IMAGE:-altvivo/mira:latest}
+  #   build:
+  #     context: ${MIRA_BUILD_CONTEXT:-../spokes/mira}
+  #   container_name: altvivo-mira
+  #   user: "10001:10001"
+  #   environment:
+  #     <<: *spoke-sso-env
+  #     ALTVIVO_APP_ID: mira
+  #     ALTVIVO_SERVICE_TOKEN: ${MIRA_SERVICE_TOKEN}
+  #     PORT: "8000"
+  #     DATABASE_URL: postgres://mira:${MIRA_DB_PASSWORD}@postgres:5432/mira
+  #     REDIS_URL: redis://mira:${REDIS_MIRA_PASSWORD}@redis:6379/0
+  #     REDIS_KEY_PREFIX: "mira:"
+  #   tmpfs:
+  #     - /tmp:size=256m,mode=1777
+  #   networks: [altvivo_net, altvivo_data]
+  #   depends_on:
+  #     altvivo-core:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD", "python", "-c", "import urllib.request as u,sys;r=u.Request('http://127.0.0.1:8000/altvivo/healthz',headers={'Host':'mira.altvivo.bio','X-Forwarded-Proto':'https'});sys.exit(0 if u.urlopen(r,timeout=4).status==200 else 1)"]
+  #     interval: 20s
+  #     timeout: 5s
+  #     retries: 4
+  #   deploy:
+  #     resources:
+  #       limits: {cpus: "2.0", memory: 2G}
+
+# -----------------------------------------------------------------------------
+networks:
+  altvivo_net:
+    name: altvivo_net
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-altvivo
+      com.docker.network.bridge.enable_icc: "true"
+    ipam:
+      config:
+        - subnet: ${APP_SUBNET:-172.30.0.0/24}
+  altvivo_data:
+    name: altvivo_data
+    driver: bridge
+    internal: true # no route to/from the outside world
+    driver_opts:
+      com.docker.network.bridge.name: br-altvivo-data
+    ipam:
+      config:
+        # Fixed: referenced by postgres/pg_hba.conf.
+        - subnet: 172.30.10.0/24
+
+secrets:
+  jwt_private_key:
+    file: ./secrets/jwt/private.pem
+  jwt_public_key:
+    file: ./secrets/jwt/public.pem
+  jwt_previous_public_key:
+    # During key rotation, holds the previous public key so tokens signed
+    # before rotation verify until they expire. Same as public.pem otherwise.
+    file: ./secrets/jwt/previous_public.pem
+
+volumes:
+  caddy_data:
+  caddy_config:
+  caddy_logs:
+  postgres_data:
+  redis_data:

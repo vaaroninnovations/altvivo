@@ -1,0 +1,285 @@
+# =============================================================================
+# AltVivo edge - Caddyfile
+#   * One wildcard + apex certificate via Cloudflare DNS-01
+#   * TLS 1.3 only, HTTP/1.1 + HTTP/2 + HTTP/3
+#   * Host routing:
+#       altvivo.bio            -> altvivo-web:3000   (portal + /workspace)
+#       www.altvivo.bio        -> 308 to apex
+#       api.altvivo.bio        -> altvivo-core:4000  (IdP / SSO / billing)
+#       embed.altvivo.bio      -> /srv/embed         (bar.js web component)
+#       <live spoke>.altvivo.bio -> spokes-enabled/*.caddy
+#       <phase-2>.altvivo.bio  -> altvivo-web /coming-soon (coming-soon.caddy)
+#       anything else          -> 302 to apex
+#   * Upstream 502/503/504 on any spoke -> altvivo-web maintenance page
+# Reload without downtime:
+#   docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+# =============================================================================
+{
+	email {$ACME_EMAIL}
+	acme_ca {$ACME_CA:https://acme-v02.api.letsencrypt.org/directory}
+
+	# Plugin directive ordering.
+	order rate_limit before basic_auth
+
+	servers {
+		protocols h1 h2 h3
+		# When the zone is proxied through Cloudflare (orange cloud), trust the
+		# published Cloudflare ranges so {client_ip} is the real visitor. When it
+		# is not proxied, Cf-Connecting-Ip from anyone else is ignored.
+		trusted_proxies cloudflare {
+			interval 12h
+			timeout 15s
+		}
+		trusted_proxies_strict
+		client_ip_headers Cf-Connecting-Ip X-Forwarded-For
+		timeouts {
+			read_header 10s
+			read_body 60s
+			idle 2m
+		}
+		max_header_size 32KB
+	}
+
+	log default {
+		output stdout
+		format json
+		level INFO
+	}
+}
+
+# -----------------------------------------------------------------------------
+# Snippets
+# -----------------------------------------------------------------------------
+
+(wildcard_tls) {
+	tls {
+		protocols tls1.3
+		dns cloudflare {env.CF_API_TOKEN}
+		resolvers 1.1.1.1 1.0.0.1
+	}
+}
+
+# Headers enforced on EVERY response (applied after upstream responds).
+(baseline_headers) {
+	header {
+		defer
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "accelerometer=(), autoplay=(self), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(self \"https://checkout.razorpay.com\" \"https://js.stripe.com\"), usb=()"
+		Cross-Origin-Opener-Policy "same-origin-allow-popups"
+		X-Permitted-Cross-Domain-Policies "none"
+		-Server
+		-X-Powered-By
+		-X-AspNet-Version
+	}
+}
+
+# Reverse proxy to an internal upstream. Strips any client-supplied internal
+# identity headers so spokes can never be tricked by a forged header.
+# Usage: import upstream <host:port>
+(upstream) {
+	request_header -X-AltVivo-*
+	request_header -X-Internal-*
+	request_header -X-Real-IP
+	reverse_proxy {args[0]} {
+		header_up X-Real-IP {client_ip}
+		fail_duration 30s
+		lb_try_duration 3s
+		lb_try_interval 250ms
+		transport http {
+			dial_timeout 5s
+			keepalive 90s
+		}
+	}
+}
+
+# Proxy to a spoke after the paid gate (no header stripping here: the gate's
+# copied X-AltVivo-* identity headers must reach the spoke).
+# Usage: import spoke_upstream <host:port>
+(spoke_upstream) {
+	reverse_proxy {args[0]} {
+		header_up X-Real-IP {client_ip}
+		fail_duration 30s
+		lb_try_duration 3s
+		lb_try_interval 250ms
+		transport http {
+			dial_timeout 5s
+			keepalive 90s
+		}
+	}
+}
+
+# Layer-1 paid-access gate (layer 2 is the spoke's own middleware).
+# altvivo-core /v1/auth/verify?app=<id> answers, per request:
+#   2xx -> continue; X-AltVivo-* identity headers are copied onto the request
+#   302 -> https://altvivo.bio/login?redirect=<url>        (not signed in)
+#          https://api.altvivo.bio/v1/auth/refresh/bounce   (token expired)
+#          https://altvivo.bio/workspace/upgrade?app=<id>&reason=subscription_required
+#   401 / 403 JSON for API and XHR callers
+# Caddy removes any client-supplied copy of a copied header that the gate did
+# not return, so identity headers cannot be spoofed.
+# Usage (inside a route, after stripping): import paid_gate <app_id>
+(paid_gate) {
+	forward_auth altvivo-core:4000 {
+		uri /v1/auth/verify?app={args[0]}
+		header_up X-Forwarded-Proto https
+		header_up X-Real-IP {client_ip}
+		copy_headers X-AltVivo-User-Id X-AltVivo-Email X-AltVivo-Role X-AltVivo-Access X-AltVivo-Plan
+		transport http {
+			dial_timeout 3s
+		}
+	}
+}
+
+# -----------------------------------------------------------------------------
+# Site: apex + every subdomain (single wildcard certificate)
+# -----------------------------------------------------------------------------
+
+altvivo.bio, *.altvivo.bio {
+	import wildcard_tls
+	import baseline_headers
+	encode zstd gzip
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 50MiB
+			roll_keep 14
+			roll_keep_for 720h
+		}
+		format json
+	}
+
+	# Never expose internal/operational endpoints, on any host.
+	@blocked path /internal/* /v1/internal/* /metrics /metrics/* /.env /.env.* /.git /.git/* /server-status /wp-admin* /wp-login.php
+	handle @blocked {
+		respond 404
+	}
+
+	# --- api.altvivo.bio : Identity Provider, SSO, billing, ledger ----------
+	@api host api.altvivo.bio
+	handle @api {
+		request_body {
+			max_size 2MB
+		}
+		header {
+			defer
+			X-Frame-Options "DENY"
+			Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+			Cross-Origin-Resource-Policy "same-site"
+			?Cache-Control "no-store"
+		}
+
+		# Edge backstop only. Authoritative limits (5/min/IP on credential
+		# endpoints, 120/min/user on /v1/api/*) are enforced in altvivo-core with
+		# Redis. Token refresh / CSRF / session reads are deliberately excluded so
+		# a whole campus behind one NAT address is not throttled.
+		rate_limit {
+			zone edge_auth {
+				match {
+					path /v1/auth/login /v1/auth/register /v1/auth/mfa/verify /v1/auth/forgot-password /v1/auth/reset-password /v1/auth/oauth/*/start
+				}
+				key {client_ip}
+				events 30
+				window 1m
+			}
+			zone edge_api {
+				key {client_ip}
+				events 600
+				window 1m
+			}
+		}
+
+		import upstream altvivo-core:4000
+	}
+
+	# --- embed.altvivo.bio : <altvivo-topbar> web component ------------------
+	@embed host embed.altvivo.bio
+	handle @embed {
+		root * /srv/embed
+		header {
+			defer
+			X-Frame-Options "DENY"
+			Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+			Access-Control-Allow-Origin "*"
+			Cross-Origin-Resource-Policy "cross-origin"
+			Cache-Control "public, max-age=300, stale-while-revalidate=86400"
+		}
+		# Versioned bundles (bar.v1.2.3.js) are immutable.
+		@immutable path_regexp ^/[a-z0-9-]+\.v[0-9]+(\.[0-9]+)*\.js$
+		header @immutable {
+			defer
+			Cache-Control "public, max-age=31536000, immutable"
+		}
+
+		@js path_regexp ^/[A-Za-z0-9._-]+\.(js|js\.map)$
+		handle @js {
+			file_server
+		}
+		handle {
+			respond 404
+		}
+	}
+
+	# --- altvivo.bio : public portal, pricing, /workspace launcher -----------
+	@apex host altvivo.bio
+	handle @apex {
+		request_body {
+			max_size 1MB
+		}
+		header {
+			defer
+			X-Frame-Options "SAMEORIGIN"
+			# altvivo-web sets a per-request nonce CSP from Next.js middleware;
+			# this strict policy is applied only when the app did not set one.
+			?Content-Security-Policy {env.WEB_CSP_FALLBACK}
+		}
+		import upstream altvivo-web:3000
+	}
+
+	@www host www.altvivo.bio
+	handle @www {
+		redir https://altvivo.bio{uri} 308
+	}
+
+	# --- LIVE spokes (one file per spoke, e.g. xprism.caddy, amaze.caddy) ----
+	# Imported BEFORE the coming-soon holding route, so an enabled spoke always
+	# wins even if its host is still listed in coming-soon.caddy.
+	import /etc/caddy/spokes-enabled/*.caddy
+
+	# --- Phase-2 holding route -----------------------------------------------
+	import /etc/caddy/coming-soon.caddy
+
+	# --- Unknown subdomain ---------------------------------------------------
+	handle {
+		redir https://altvivo.bio 302
+	}
+
+	# --- Spoke unavailable (deploy, crash, maintenance) ----------------------
+	handle_errors {
+		@spoke_down {
+			not host altvivo.bio www.altvivo.bio api.altvivo.bio embed.altvivo.bio
+			expression `{err.status_code} in [502, 503, 504]`
+		}
+		handle @spoke_down {
+			header {
+				defer
+				X-Frame-Options "SAMEORIGIN"
+				Cache-Control "no-store"
+				Retry-After "60"
+			}
+			@portal_assets path /_next/* /favicon.ico /brand/* /fonts/*
+			handle @portal_assets {
+				reverse_proxy altvivo-web:3000
+			}
+			handle {
+				rewrite * /coming-soon?app={labels.2}&state=maintenance
+				reverse_proxy altvivo-web:3000
+			}
+		}
+		handle {
+			header Cache-Control "no-store"
+			respond "{err.status_code} {err.status_text}" {err.status_code}
+		}
+	}
+}

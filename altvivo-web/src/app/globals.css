@@ -1,0 +1,301 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ------------------------------------------------------------------------
+ * AltVivo design tokens - premium academic / scientific publishing.
+ * Taken from the AltVivo logo: ultramarine (#0A14D6) to violet (#9B0AF0).
+ * Light mode: warm archival paper (#FAF9F6) with deep ink text.
+ * Dark mode: midnight ink (#09081A). Emerald = licensed / live,
+ * amber = coming soon. Type: IBM Plex Serif (display), IBM Plex Sans
+ * (interface) and IBM Plex Mono (data readouts), all open source (OFL).
+ * --------------------------------------------------------------------- */
+:root {
+  --bg: #faf9f6;
+  --surface: #ffffff;
+  --surface-2: #f3f1ec;
+  --surface-3: #e8e5de;
+  --line: #e6e2d9;
+  --line-strong: #d3cec3;
+  --fg: #110e2b;
+  --muted: #4b4766;
+  --subtle: #6f6b88;
+  --accent: #4b1fd8;
+  --accent-ink: #3a14b8;
+  --accent-soft: rgb(75 31 216 / 0.08);
+  --brand-from: #0a14d6;
+  --brand-to: #9b0af0;
+  --live: #0f9f6e;
+  --live-ink: #047857;
+  --live-soft: rgb(16 185 129 / 0.12);
+  --soon: #d97706;
+  --soon-ink: #b45309;
+  --soon-soft: rgb(245 158 11 / 0.14);
+  --danger: #c62828;
+  --danger-soft: rgb(220 38 38 / 0.09);
+  --grid: rgb(17 14 43 / 0.04);
+  --glow: rgb(75 31 216 / 0.2);
+  --shadow: 0 1px 2px rgb(17 14 43 / 0.04), 0 12px 32px -16px rgb(17 14 43 / 0.14);
+  --ambient-a: rgb(10 20 214 / 0.07);
+  --ambient-b: rgb(155 10 240 / 0.06);
+  color-scheme: light;
+}
+
+.dark {
+  --bg: #09081a;
+  --surface: #100e26;
+  --surface-2: #161338;
+  --surface-3: #1f1b48;
+  --line: #221e46;
+  --line-strong: #34306a;
+  --fg: #f5f3ff;
+  --muted: #b6b1d6;
+  --subtle: #8a85ad;
+  --accent: #7c5cff;
+  --accent-ink: #c1b0ff;
+  --accent-soft: rgb(124 92 255 / 0.14);
+  --brand-from: #3b45ff;
+  --brand-to: #a93cff;
+  --live: #10b981;
+  --live-ink: #34d399;
+  --live-soft: rgb(16 185 129 / 0.14);
+  --soon: #f59e0b;
+  --soon-ink: #fbbf24;
+  --soon-soft: rgb(245 158 11 / 0.14);
+  --danger: #f87171;
+  --danger-soft: rgb(248 113 113 / 0.12);
+  --grid: rgb(193 176 255 / 0.05);
+  --glow: rgb(124 92 255 / 0.32);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 16px 40px -18px rgb(0 0 0 / 0.6);
+  --ambient-a: rgb(59 69 255 / 0.16);
+  --ambient-b: rgb(169 60 255 / 0.13);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-brand-from: var(--brand-from);
+  --color-brand-to: var(--brand-to);
+  --color-live: var(--live);
+  --color-live-ink: var(--live-ink);
+  --color-live-soft: var(--live-soft);
+  --color-soon: var(--soon);
+  --color-soon-ink: var(--soon-ink);
+  --color-soon-soft: var(--soon-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: var(--font-plex-serif), "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@layer base {
+  html {
+    background: var(--bg);
+    color: var(--fg);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* Ambient page background: two soft brand glows fixed to the viewport. */
+  body {
+    background-color: var(--bg);
+    background-image:
+      radial-gradient(60rem 40rem at 0% -10%, var(--ambient-a), transparent 70%),
+      radial-gradient(50rem 36rem at 100% 0%, var(--ambient-b), transparent 70%),
+      radial-gradient(70rem 40rem at 50% 120%, var(--ambient-b), transparent 70%);
+    background-attachment: fixed;
+    color: var(--fg);
+    font-family: var(--font-sans);
+    min-height: 100dvh;
+  }
+  /* Display headings set in a scholarly serif; h3+ stay in the interface face. */
+  h1,
+  h2 {
+    font-family: var(--font-serif);
+    font-weight: 500;
+    letter-spacing: -0.015em;
+  }
+  ::selection {
+    background: rgb(124 92 255 / 0.22);
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+@layer components {
+  /* Slow-moving aurora of the two brand colours behind the hero. */
+  .aurora {
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(80px);
+    animation: aurora-drift 22s ease-in-out infinite alternate;
+  }
+  .aurora-a {
+    background: radial-gradient(circle, var(--brand-from), transparent 65%);
+  }
+  .aurora-b {
+    background: radial-gradient(circle, var(--brand-to), transparent 65%);
+    animation-duration: 28s;
+    animation-direction: alternate-reverse;
+  }
+  @keyframes aurora-drift {
+    0% { transform: translate3d(0, 0, 0) scale(1); }
+    50% { transform: translate3d(6%, 4%, 0) scale(1.08); }
+    100% { transform: translate3d(-4%, 8%, 0) scale(0.96); }
+  }
+  .glow {
+    box-shadow: 0 0 0 1px var(--line), 0 24px 56px -28px var(--glow);
+  }
+  .elevated {
+    box-shadow: var(--shadow);
+  }
+  .brand-gradient {
+    background-image: linear-gradient(100deg, var(--brand-from), var(--brand-to));
+  }
+  .brand-text {
+    background-image: linear-gradient(100deg, var(--brand-from), var(--brand-to));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* Thin rule with a short brand-gradient lead, like a journal section mark. */
+  .rule-mark {
+    height: 2px;
+    width: 3rem;
+    border-radius: 2px;
+    background-image: linear-gradient(90deg, var(--brand-from), var(--brand-to));
+  }
+  .readout {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+  }
+  .field {
+    width: 100%;
+    border-radius: 10px;
+    border: 1px solid var(--line-strong);
+    background: var(--surface);
+    padding: 0.65rem 0.8rem;
+    font-size: 0.95rem;
+    color: var(--fg);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .field::placeholder {
+    color: var(--subtle);
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .field[aria-invalid="true"] {
+    border-color: var(--danger);
+  }
+}
+
+/* Long-form legal and policy text. */
+@layer components {
+  .legal {
+    color: var(--muted);
+    line-height: 1.75;
+    font-size: 0.97rem;
+  }
+  .legal h2 {
+    margin-top: 2.75rem;
+    scroll-margin-top: 6rem;
+    font-size: 1.55rem;
+    font-weight: 500;
+    letter-spacing: -0.015em;
+    color: var(--fg);
+  }
+  .legal h3 {
+    margin-top: 1.75rem;
+    font-size: 1.02rem;
+    font-weight: 650;
+    color: var(--fg);
+  }
+  .legal p,
+  .legal ul,
+  .legal ol,
+  .legal table {
+    margin-top: 0.9rem;
+  }
+  .legal ul {
+    list-style: disc;
+    padding-left: 1.3rem;
+  }
+  .legal ol {
+    list-style: decimal;
+    padding-left: 1.3rem;
+  }
+  .legal li + li {
+    margin-top: 0.35rem;
+  }
+  .legal strong {
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .legal a {
+    color: var(--accent-ink);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .legal code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    color: var(--fg);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 0.05rem 0.35rem;
+  }
+  .legal table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+  }
+  .legal th,
+  .legal td {
+    border: 1px solid var(--line);
+    padding: 0.55rem 0.7rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  .legal th {
+    background: var(--surface-2);
+    color: var(--fg);
+    font-weight: 600;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

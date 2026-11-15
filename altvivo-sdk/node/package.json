@@ -1,0 +1,26 @@
+{
+  "name": "@altvivo/sso",
+  "version": "1.0.0",
+  "description": "AltVivo SSO for Node/Express spokes: verifies the .altvivo.bio RS256 access-token cookie locally via JWKS",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "files": ["src"],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "jose": "6.2.14"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

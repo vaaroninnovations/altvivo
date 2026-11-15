@@ -1,0 +1,19 @@
+# PharmADME - 3D Multi-Compartment Human PK/ADME Simulator
+# Enable with: ./scripts/spoke-route.sh enable pharmadme   (paid gate included)
+@pharmadme host pharmadme.altvivo.bio
+handle @pharmadme {
+	request_body {
+		max_size 25MB
+	}
+	header {
+		defer
+		X-Frame-Options "SAMEORIGIN"
+		?Content-Security-Policy {env.SPOKE_CSP_DEFAULT}
+	}
+	route {
+		request_header -X-AltVivo-*
+		request_header -X-Internal-*
+		import paid_gate pharmadme
+		import spoke_upstream pharmadme:8000
+	}
+}

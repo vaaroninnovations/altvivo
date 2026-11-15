@@ -1,0 +1,32 @@
+# XPRISM - Virtual Pharmacology & CAL In-Vivo Simulation (LIVE, paid)
+@xprism host xprism.altvivo.bio
+handle @xprism {
+	request_body {
+		max_size 5MB # CSV / Excel uploads (XPRISM nginx limit)
+	}
+	header {
+		defer
+		X-Frame-Options "SAMEORIGIN"
+		?Content-Security-Policy {env.SPOKE_CSP_XPRISM}
+	}
+
+	# Resend inbound-mail webhook: authenticated by Resend's signature, not SSO.
+	@xprism_webhook path /api/resend/inbound
+	handle @xprism_webhook {
+		route {
+			request_header -X-AltVivo-*
+			request_header -X-Internal-*
+			import spoke_upstream xprism:8000
+		}
+	}
+
+	# Everything else: signed in + active XPRISM entitlement (or VIP role).
+	handle {
+		route {
+			request_header -X-AltVivo-*
+			request_header -X-Internal-*
+			import paid_gate xprism
+			import spoke_upstream xprism:8000
+		}
+	}
+}

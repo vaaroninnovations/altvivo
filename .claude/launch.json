@@ -1,0 +1,38 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "topbar-demo",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8765",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "altvivo-infra/embed"
+      ],
+      "port": 8765
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "altvivo-web",
+        "run",
+        "start"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "core-dev",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "altvivo-core/scripts/dev-stack.mjs"
+      ],
+      "port": 4000
+    }
+  ]
+}

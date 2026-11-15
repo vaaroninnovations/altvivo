@@ -1,0 +1,19 @@
+[Unit]
+Description=AltVivo encrypted backup (Postgres + Redis -> age -> R2)
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+# Adjust if the repo lives elsewhere.
+WorkingDirectory=/opt/altvivo/altvivo-infra
+ExecStart=/opt/altvivo/altvivo-infra/scripts/backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=3h
+PrivateTmp=yes
+ProtectHome=read-only
+NoNewPrivileges=yes
+StandardOutput=append:/var/log/altvivo-backup.log
+StandardError=append:/var/log/altvivo-backup.log

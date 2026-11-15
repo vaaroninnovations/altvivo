@@ -1,0 +1,20 @@
+# aMaze - Rodent Neurobehavioral Video Tracking & Heatmaps (LIVE, paid)
+# Static SPA on nginx :8080. The gate runs for every request, including
+# JS/CSS assets, so unpaid visitors cannot load any of the application.
+@amaze host amaze.altvivo.bio
+handle @amaze {
+	request_body {
+		max_size 1MB
+	}
+	header {
+		defer
+		X-Frame-Options "SAMEORIGIN"
+		?Content-Security-Policy {env.SPOKE_CSP_AMAZE}
+	}
+	route {
+		request_header -X-AltVivo-*
+		request_header -X-Internal-*
+		import paid_gate amaze
+		import spoke_upstream amaze:8080
+	}
+}

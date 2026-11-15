@@ -1,0 +1,28 @@
+# Dependencies and build output
+node_modules/
+.next/
+dist/
+!altvivo-infra/embed/dist/
+build/
+*.tsbuildinfo
+next-env.d.ts
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Local environment and secrets (never commit)
+.env
+.env.*
+!.env.example
+!.env.development.example
+*.pem
+*.key
+
+# Logs and OS files
+*.log
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings (launch.json is shared)
+.claude/*
+!.claude/launch.json

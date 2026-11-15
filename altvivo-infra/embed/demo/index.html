@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Topbar demo</title>
+  <style>
+    body { margin:0; font-family: system-ui, sans-serif; background:#F8FAFC; color:#0B0F19; }
+    main { padding:24px 16px; max-width:900px; margin:0 auto; }
+    .controls { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+    button { padding:6px 12px; border-radius:6px; border:1px solid #CBD5E1; background:#fff; cursor:pointer; }
+    pre { background:#0B0F19; color:#E2E8F0; padding:12px; border-radius:8px; font-size:12px; overflow:auto; }
+  </style>
+  <script>
+    // Mock of api.altvivo.bio for local preview only (?state=signedout|unverified).
+    (function () {
+      const state = new URLSearchParams(location.search).get("state") || "signedin";
+      const apps = [
+        { appId: "xprism", name: "XPRISM", tagline: "Virtual Pharmacology & CAL In-Vivo Rodent Simulation", url: "https://xprism.altvivo.bio", status: "LIVE", iconKey: "flask-conical" },
+        { appId: "amaze", name: "aMaze", tagline: "Rodent Neurobehavioral Video Tracking & Heatmaps", url: "https://amaze.altvivo.bio", status: "LIVE", iconKey: "scan-eye" },
+        { appId: "pharmadme", name: "PharmADME", tagline: "3D Multi-Compartment Human PK/ADME Simulator", url: "https://pharmadme.altvivo.bio", status: "COMING_SOON", iconKey: "pill" },
+        { appId: "stat", name: "Stat 'O' Mate AI", tagline: "Life Sciences Biostatistics Platform", url: "https://stat.altvivo.bio", status: "COMING_SOON", iconKey: "sigma" },
+        { appId: "phytonet", name: "PhytoNet AI", tagline: "Network Pharmacology & Molecular Docking", url: "https://phytonet.altvivo.bio", status: "COMING_SOON", iconKey: "leaf" },
+        { appId: "mira", name: "MIRA", tagline: "Automated Manuscript Screening & Reference Verification", url: "https://evil.example/phish", status: "COMING_SOON", iconKey: "file-search" },
+      ];
+      const user = {
+        id: "usr_1", email: "researcher@institute.edu.in", name: "Dr. Priya Raman", role: "PI", tier: "INSTITUTIONAL_PRO",
+        emailVerified: state !== "unverified", creditsRemaining: 1250,
+        entitlements: {
+          xprism: { active: true, level: "full", plan: "xprism_annual", expiresAt: new Date(Date.now() + 200 * 864e5).toISOString() },
+          amaze: { active: false, level: "none", plan: null, expiresAt: null },
+        },
+        accessTokenExpiresAt: new Date(Date.now() + 900000).toISOString(),
+      };
+      const log = [];
+      window.__calls = log;
+      const json = (b, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "content-type": "application/json" } });
+      window.fetch = async (url, init = {}) => {
+        log.push(`${init.method || "GET"} ${url}`);
+        if (url.endsWith("/v1/public/apps")) return json({ apps });
+        if (url.endsWith("/v1/auth/session")) return state === "signedout" ? json({ error: {} }, 401) : json({ user });
+        if (url.endsWith("/v1/auth/csrf")) return json({ csrfToken: "demo.token" });
+        if (url.endsWith("/v1/auth/refresh")) return state === "signedout" ? json({ error: {} }, 401) : json({ user });
+        if (url.endsWith("/v1/auth/logout")) return new Response(null, { status: 204 });
+        return json({ error: { code: "NOT_FOUND" } }, 404);
+      };
+    })();
+  </script>
+  <script src="../src/bar.js" defer></script>
+</head>
+<body>
+  <altvivo-topbar app="xprism" theme="light"></altvivo-topbar>
+  <main>
+    <div class="controls">
+      <button data-theme="light">Light</button><button data-theme="dark">Dark</button>
+      <a href="?state=signedin">signed in</a> · <a href="?state=unverified">unverified</a> · <a href="?state=signedout">signed out</a>
+    </div>
+    <p>Host page content. The bar above is a shadow-DOM web component.</p>
+    <pre id="log"></pre>
+  </main>
+  <script>
+    document.querySelectorAll("[data-theme]").forEach((b) => b.addEventListener("click", () => {
+      const t = b.dataset.theme;
+      document.querySelector("altvivo-topbar").setAttribute("theme", t);
+      document.body.style.background = t === "dark" ? "#0B0F19" : "#F8FAFC";
+      document.body.style.color = t === "dark" ? "#F8FAFC" : "#0B0F19";
+    }));
+    addEventListener("altvivo:session", (e) => { document.getElementById("log").textContent = "altvivo:session " + e.detail.user.email + "\n" + window.__calls.join("\n"); });
+  </script>
+</body>
+</html>

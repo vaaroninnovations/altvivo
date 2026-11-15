@@ -1,0 +1,17 @@
+{
+  "icc": false,
+  "userland-proxy": false,
+  "no-new-privileges": true,
+  "live-restore": true,
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "5"
+  },
+  "default-ulimits": {
+    "nofile": { "Name": "nofile", "Soft": 65536, "Hard": 65536 }
+  },
+  "default-address-pools": [
+    { "base": "172.31.0.0/16", "size": 24 }
+  ]
+}

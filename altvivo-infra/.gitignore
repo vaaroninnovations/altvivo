@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+secrets/*
+!secrets/.gitkeep
+*.tar.age
+*.tar.age.sha256
+*.partial
+*.altvivo.bak
+env/*.env
