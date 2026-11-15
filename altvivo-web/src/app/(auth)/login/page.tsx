@@ -20,6 +20,14 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   const next = safeNext(sp.redirect ?? sp.next);
   const state = await readSession();
   if (state.session) redirect(next);
-  const notice = sp.reset ? "Your password was changed. Sign in with the new one." : sp.verify_error ? "That verification link is invalid or has expired. Sign in to request a new one." : null;
+  const notice = sp.reset
+    ? "Your password was changed. Sign in with the new one."
+    : sp.verify_signin
+      ? "Sign in to confirm your email address. Didn't create this account? Use \"Forgot password\" to take it over."
+      : sp.verify_error === "wrong_account"
+        ? "That verification link belongs to a different account. Sign out, then open the link again."
+        : sp.verify_error
+          ? "That verification link is invalid or has expired. Sign in to request a new one."
+          : null;
   return <LoginForm next={next} oauthError={sp.error ? (OAUTH_ERRORS[sp.error] ?? "Sign-in failed. Please try again.") : null} notice={notice} />;
 }

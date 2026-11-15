@@ -8,7 +8,7 @@ import { notFound } from '../lib/errors.js';
 import { safeRedirect } from '../lib/net.js';
 import { actorOf } from '../plugins/security.js';
 import type { OAuthIdentity, OAuthProviderId } from '../services/oauth.js';
-import { autoJoinOrganization, completeLogin, createMfaChallenge } from './auth.js';
+import { autoJoinOrganization, clearUnprovenSignInMethods, completeLogin, createMfaChallenge } from './auth.js';
 
 interface StoredState {
   provider: OAuthProviderId;
@@ -120,6 +120,10 @@ export default async function oauthRoutes(app: FastifyInstance, d: Deps) {
           if (byEmail) {
             await withAudit(d.prisma, { ...actor, actorId: byEmail.id, actorType: 'USER' }, async (tx) => {
               const preVerified = byEmail.emailVerifiedAt !== null;
+              // Same guard for identities: an ORCID linked to an unverified
+              // address was not linked by the mailbox owner.
+              const unlinked = preVerified ? 0 : await clearUnprovenSignInMethods(tx, byEmail.id);
+              if (unlinked) await audit(tx, 'AUTH.OAUTH_UNLINKED', byEmail.id, { reason: 'unverified_account_claimed', count: unlinked });
               await tx.user.update({
                 where: { id: byEmail.id },
                 // Pre-registration takeover guard: if the address was never

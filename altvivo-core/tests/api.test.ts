@@ -455,6 +455,75 @@ describe('OAuth', () => {
     const again = await oauthLogin('orcid');
     expect(again.cb.headers.location).toBe('https://amaze.altvivo.bio/projects');
   });
+
+  describe('pre-account takeover through an ORCID-linked registration', () => {
+    let n = 0;
+    /** Attacker signs in with their own ORCID and registers the victim's address (no password). */
+    async function attackerRegisters(victim: string) {
+      n += 1;
+      const orcid = `0000-0003-0000-00${String(n).padStart(2, '0')}`;
+      ctx.orcid.next = { provider: 'ORCID', subject: orcid, email: null, emailVerified: false, name: 'Mallory', orcidId: orcid };
+      const { br, cb } = await oauthLogin('orcid');
+      const pendingId = new URL(cb.headers.location as string).searchParams.get('oauth')!;
+      await br.csrf();
+      const r = await br.request('POST', '/v1/auth/register', { email: victim, fullName: 'Mallory Attacker', turnstileToken: 'ok', oauthPendingId: pendingId });
+      expect(r.statusCode).toBe(201);
+      return { attacker: br, orcid };
+    }
+    async function attackerOrcidLogin(orcid: string) {
+      ctx.orcid.next = { provider: 'ORCID', subject: orcid, email: null, emailVerified: false, name: 'Mallory', orcidId: orcid };
+      return (await oauthLogin('orcid')).cb.headers.location as string;
+    }
+
+    it('a password reset by the mailbox owner removes the attacker ORCID link', async () => {
+      const victim = 'takeover-reset@uni.edu';
+      const { orcid } = await attackerRegisters(victim);
+      const owner = new Browser(ctx.app);
+      await owner.csrf();
+      await owner.request('POST', '/v1/auth/forgot-password', { email: victim, turnstileToken: 'ok' });
+      const reset = await owner.request('POST', '/v1/auth/reset-password', { token: linkToken(ctx.mailer.lastTo(victim)!.text), password: PASSWORD });
+      expect(reset.statusCode).toBe(204);
+
+      const u = await ctx.deps.prisma.user.findUniqueOrThrow({ where: { email: victim }, include: { oauthAccounts: true } });
+      expect(u.emailVerifiedAt).not.toBeNull();
+      expect(u.orcidId).toBeNull();
+      expect(u.oauthAccounts).toHaveLength(0);
+      // The attacker's ORCID no longer opens the account: it starts a fresh sign-up.
+      expect(new URL(await attackerOrcidLogin(orcid)).pathname).toBe('/register');
+    });
+
+    it('a Google claim by the mailbox owner removes the attacker ORCID link', async () => {
+      const victim = 'takeover-google@gmail.com';
+      const { orcid } = await attackerRegisters(victim);
+      ctx.google.next = { provider: 'GOOGLE', subject: 'g-takeover', email: victim, emailVerified: true, name: 'Victim', orcidId: null };
+      expect((await oauthLogin('google')).cb.headers.location).toBe('https://amaze.altvivo.bio/projects');
+
+      const u = await ctx.deps.prisma.user.findUniqueOrThrow({ where: { email: victim }, include: { oauthAccounts: true } });
+      expect(u.orcidId).toBeNull();
+      expect(u.oauthAccounts.map((a) => a.provider)).toEqual(['GOOGLE']);
+      expect(new URL(await attackerOrcidLogin(orcid)).pathname).toBe('/register');
+    });
+
+    it('an unsolicited verification link opened elsewhere does not verify the account', async () => {
+      const victim = 'takeover-verify@uni.edu';
+      await attackerRegisters(victim);
+      const link = `/v1/auth/verify-email?token=${encodeURIComponent(linkToken(ctx.mailer.lastTo(victim)!.text))}`;
+
+      // Victim's browser, not signed in: asked to sign in, nothing verified.
+      const r = await new Browser(ctx.app).request('GET', link);
+      expect(r.statusCode).toBe(303);
+      const loc = new URL(r.headers.location as string);
+      expect(loc.pathname).toBe('/login');
+      expect(loc.searchParams.get('verify_signin')).toBe('1');
+      // A browser signed in to some other account is refused too.
+      const other = new Browser(ctx.app);
+      await register(other, 'bystander@uni.edu');
+      expect((await other.request('GET', link)).headers.location).toContain('verify_error=wrong_account');
+
+      const u = await ctx.deps.prisma.user.findUniqueOrThrow({ where: { email: victim } });
+      expect(u.emailVerifiedAt).toBeNull();
+    });
+  });
 });
 
 describe('audit trail integrity after the whole suite', () => {

@@ -153,6 +153,18 @@ export async function autoJoinOrganization(d: Deps, tx: Tx, userId: string, user
   await audit(tx, 'ORG.AUTO_JOIN', org.id, { user_id: userId, domain });
 }
 
+/**
+ * Pre-account-takeover guard. Before an address is verified, anyone can
+ * register it and attach a password or an ORCID / Google identity. When the
+ * mailbox owner later claims the account (password reset, Google with a
+ * verified email), every sign-in method set up before that proof is removed.
+ */
+export async function clearUnprovenSignInMethods(tx: Tx, userId: string): Promise<number> {
+  const { count } = await tx.oAuthAccount.deleteMany({ where: { userId } });
+  await tx.user.update({ where: { id: userId }, data: { orcidId: null } });
+  return count;
+}
+
 export async function completeLogin(
   d: Deps,
   req: FastifyRequest,
@@ -171,6 +183,24 @@ export async function completeLogin(
 }
 
 export default async function authRoutes(app: FastifyInstance, d: Deps) {
+  /**
+   * User id of the browser's live session, or null. An access token past its
+   * 15-minute expiry still counts while its session is unrevoked, so a user
+   * who registered earlier is not sent round in a login loop.
+   */
+  const signedInUserId = async (req: FastifyRequest): Promise<string | null> => {
+    const token = req.cookies[ACCESS_COOKIE];
+    if (!token) return null;
+    try {
+      const claims = await d.tokens.verify(token, { allowExpiredUpToSeconds: d.cfg.REFRESH_TOKEN_TTL_SECONDS });
+      const session = await d.prisma.authSession.findUnique({ where: { id: claims.sid }, select: { userId: true, revokedAt: true, expiresAt: true } });
+      if (!session || session.revokedAt || session.expiresAt <= new Date() || session.userId !== claims.sub) return null;
+      return claims.sub;
+    } catch {
+      return null;
+    }
+  };
+
   const failLogin = async (req: FastifyRequest, user: User | null, emailAddr: string, reason: string) => {
     await withAudit(d.prisma, { ...actorOf(req), actorId: user?.id ?? null, actorType: user ? 'USER' : 'SYSTEM' }, async (tx) => {
       if (user) {
@@ -393,6 +423,18 @@ export default async function authRoutes(app: FastifyInstance, d: Deps) {
     if (token.length < 20 || token.length > 128) return fail();
     const row = await d.prisma.authToken.findUnique({ where: { tokenHash: authTokenHash(d, token) }, include: { user: true } });
     if (!row || row.purpose !== 'EMAIL_VERIFY' || row.consumedAt || row.expiresAt <= new Date()) return fail();
+    if (!row.user.emailVerifiedAt) {
+      // Bind verification to the person who registered: the link only counts
+      // when opened by a browser signed in to this account. Otherwise a mailbox
+      // owner clicking an unsolicited link would verify an account whose
+      // password or ORCID belongs to someone else.
+      const signedInAs = await signedInUserId(req);
+      if (signedInAs !== row.userId) {
+        if (signedInAs) return reply.redirect(`${d.cfg.webOrigin}/login?verify_error=wrong_account`, 303);
+        const self = `${d.cfg.PUBLIC_API_URL}/v1/auth/verify-email?token=${encodeURIComponent(token)}`;
+        return reply.redirect(`${d.cfg.webOrigin}/login?${new URLSearchParams({ redirect: self, verify_signin: '1' })}`, 303);
+      }
+    }
     await withAudit(d.prisma, { ...actorOf(req), actorId: row.userId, actorType: 'USER' }, async (tx) => {
       const claimed = await tx.authToken.updateMany({ where: { id: row.id, consumedAt: null }, data: { consumedAt: new Date() } });
       if (claimed.count !== 1) return;
@@ -448,6 +490,9 @@ export default async function authRoutes(app: FastifyInstance, d: Deps) {
     await withAudit(d.prisma, actor, async (tx) => {
       const claimed = await tx.authToken.updateMany({ where: { id: row.id, consumedAt: null }, data: { consumedAt: new Date() } });
       if (claimed.count !== 1) throw badRequest('RESET_TOKEN_INVALID', 'This reset link is invalid or has expired');
+      // Claiming an unverified account: drop identities linked before the owner proved the mailbox.
+      const unlinked = row.user.emailVerifiedAt ? 0 : await clearUnprovenSignInMethods(tx, row.userId);
+      if (unlinked) await audit(tx, 'AUTH.OAUTH_UNLINKED', row.userId, { reason: 'unverified_account_claimed', count: unlinked });
       await tx.user.update({
         where: { id: row.userId },
         data: {
