@@ -14,7 +14,7 @@ export const FALLBACK_APPS: PublicApp[] = [
   },
   {
     appId: "amaze", name: "aMaze", tagline: "Rodent Neurobehavioral Video Tracking & Heatmaps",
-    description: "Upload rodent behavioural assay videos and get markerless tracking, automatic arena and ROI detection, trajectory metrics and occupancy heatmaps.",
+    description: "aMaze is a modern, high-precision rodent behavioral tracking and analysis suite for laboratory neuroscience and behavioral pharmacology. It combines computer vision tracking, customizable arena/zone geometry, real-time posture alignment, trial management, multi-paradigm analytics, and interactive data visualization with exportable reports.",
     url: "https://amaze.altvivo.bio", status: "LIVE", version: "1.0.0", requiresCredits: true, phase: 1, sortOrder: 20, iconKey: "scan-eye",
     highlights: ["Automatic arena / ROI detection", "Markerless tracking", "Behavioural assay heatmaps", "Open field, EPM, Y-maze, MWM", "CSV / JSON export to the AltVivo vault"],
   },

@@ -71,7 +71,7 @@ export const APPS: readonly AppSeed[] = [
     name: 'aMaze',
     tagline: 'Rodent Neurobehavioral Video Tracking & Heatmaps',
     description:
-      'Upload rodent behavioural assay videos and get markerless tracking, automatic arena and ROI detection, trajectory metrics and occupancy heatmaps.',
+      'aMaze is a modern, high-precision rodent behavioral tracking and analysis suite for laboratory neuroscience and behavioral pharmacology. It combines computer vision tracking, customizable arena/zone geometry, real-time posture alignment, trial management, multi-paradigm analytics, and interactive data visualization with exportable reports.',
     status: 'LIVE',
     version: '1.0.0',
     requiresCredits: true, // sold per use as well: one credit = one animal / video analysed

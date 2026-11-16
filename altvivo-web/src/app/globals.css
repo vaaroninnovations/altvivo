@@ -179,10 +179,12 @@
     border-radius: 2px;
     background-image: linear-gradient(90deg, var(--brand-from), var(--brand-to));
   }
+  /* Figures: Inter with even-width digits and a plain (undotted) zero. */
   .readout {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em;
+    font-feature-settings: "tnum" 1, "zero" 0;
+    letter-spacing: -0.02em;
   }
   .eyebrow {
     font-family: var(--font-mono);

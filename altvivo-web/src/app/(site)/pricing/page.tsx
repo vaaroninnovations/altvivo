@@ -26,7 +26,6 @@ export default async function PricingPage({ searchParams }: { searchParams: Prom
             Start with {offer.days} days of full access at no cost. Afterwards subscribe to XPRISM, to aMaze, or to both: they are separate products.
             Every purchase comes with a GST tax invoice.
           </SectionHeading>
-          <p className="readout text-xs text-subtle">Prices in ₹ INR · Razorpay · UPI, cards, NetBanking · GST invoice</p>
         </div>
 
         <div className="glow mt-10 flex flex-col gap-5 rounded-2xl border border-accent/30 bg-accent-soft p-6 sm:flex-row sm:items-center sm:p-7">
