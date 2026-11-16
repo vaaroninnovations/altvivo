@@ -56,7 +56,7 @@ Build-time (`NEXT_PUBLIC_*`, Docker build args): `NEXT_PUBLIC_API_URL`, `NEXT_PU
 
 Runtime:
 - **Search engines and analytics (all optional, read per request):** `GOOGLE_SITE_VERIFICATION` and `BING_SITE_VERIFICATION` print the ownership meta tags in `<head>` (`src/app/layout.tsx`); `GA_MEASUREMENT_ID` (`G-XXXXXXXXXX`) turns on Google Analytics 4 (`components/analytics.tsx`), which loads only after the visitor allows Analytics cookies, never on signed-in pages, and is added to the CSP only when set. `/robots.txt` and `/sitemap.xml` come from `src/app/robots.ts` and `src/app/sitemap.ts`.
-- **About page founder:** `LEGAL_FOUNDER_NAME`, `LEGAL_FOUNDER_ROLE`, `LEGAL_FOUNDER_BIO`.
+- **About page founder:** `LEGAL_FOUNDER_NAME`, `LEGAL_FOUNDER_ROLE`, `LEGAL_FOUNDER_BIO`, `LEGAL_FOUNDER_PHOTO` (blank uses the built-in profile and `public/brand/founder.jpg`).
 - **Core API:** `CORE_INTERNAL_URL`, `JWKS_INTERNAL_URL`, `JWT_ISSUER`.
 - **Legal identity:**
   - `LEGAL_ENTITY_NAME`, `LEGAL_REGISTERED_ADDRESS`, `LEGAL_CIN`, `SELLER_TRADE_NAME`, `SELLER_GSTIN`;

@@ -211,10 +211,21 @@ export default async function AboutPage() {
 
       {/* ---------------------------------------------------------- founder */}
       <section id="founder" className="scroll-mt-24 border-y border-line bg-surface/70">
-        <div className="mx-auto grid max-w-7xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-[auto_1fr] lg:items-start lg:py-20">
-          <div className="brand-gradient grid size-24 place-items-center rounded-3xl text-white">
-            <UserRound className="size-11" aria-hidden strokeWidth={1.5} />
-          </div>
+        <div className="mx-auto grid max-w-7xl gap-10 px-4 py-16 sm:px-6 lg:grid-cols-[auto_1fr] lg:items-start lg:gap-14 lg:py-20">
+          {L.founderPhoto ? (
+            <img
+              src={L.founderPhoto}
+              width={1200}
+              height={1600}
+              alt={`Portrait of ${L.founderName}`}
+              loading="lazy"
+              className="aspect-[4/5] w-52 rounded-3xl border border-line object-cover object-top shadow-sm sm:w-64 lg:w-72"
+            />
+          ) : (
+            <div className="brand-gradient grid size-24 place-items-center rounded-3xl text-white">
+              <UserRound className="size-11" aria-hidden strokeWidth={1.5} />
+            </div>
+          )}
           <div className="max-w-3xl">
             <p className="eyebrow">Who started it</p>
             <h2 className="mt-3 text-3xl sm:text-4xl">{L.founderName || "The person behind AltVivo"}</h2>
