@@ -1,0 +1,3 @@
+# Imported inside the global `servers { }` block when CADDY_EDGE_MODE=direct
+# (the default): Caddy publishes 80/443 itself and serves HTTP/3 over UDP 443.
+protocols h1 h2 h3

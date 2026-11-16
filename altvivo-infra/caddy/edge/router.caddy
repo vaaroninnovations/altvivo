@@ -1,0 +1,19 @@
+# Imported inside the global `servers { }` block when CADDY_EDGE_MODE=router.
+#
+# The host's pass-through router (edge-router/haproxy.cfg) owns ports 80/443,
+# reads only the TLS server name, and forwards altvivo.bio connections to
+# 127.0.0.1:8443 with a PROXY protocol v2 header carrying the visitor's real IP.
+# TLS is still terminated here, so certificates and keys never leave Caddy.
+#
+# Trusted senders: the router reaches Caddy through Docker's published port,
+# so connections arrive from the Docker bridge gateway (172.16.0.0/12) or, on
+# some hosts, loopback. Caddy's ports are published on 127.0.0.1 only in this
+# mode, so nothing on the internet can reach Caddy without the router.
+protocols h1 h2
+listener_wrappers {
+	proxy_protocol {
+		timeout 5s
+		allow 172.16.0.0/12 127.0.0.0/8
+	}
+	tls
+}

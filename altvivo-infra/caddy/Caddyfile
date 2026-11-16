@@ -22,7 +22,12 @@
 	order rate_limit before basic_auth
 
 	servers {
-		protocols h1 h2 h3
+		# Edge mode (CADDY_EDGE_MODE in .env):
+		#   direct - Caddy owns ports 80/443 on the host; HTTP/1.1, HTTP/2, HTTP/3.
+		#   router - a pass-through router (edge-router/haproxy.cfg) owns 80/443 and
+		#            forwards altvivo.bio TLS here with the PROXY protocol, so the
+		#            VPS can host other websites. HTTP/3 is off in this mode.
+		import /etc/caddy/edge/{$CADDY_EDGE_MODE:direct}.caddy
 		# When the zone is proxied through Cloudflare (orange cloud), trust the
 		# published Cloudflare ranges so {client_ip} is the real visitor. When it
 		# is not proxied, Cf-Connecting-Ip from anyone else is ignored.

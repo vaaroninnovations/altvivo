@@ -125,6 +125,50 @@ Expected directory layout on the server:
    sudo ./scripts/backup.sh
    ```
 
+## Shared VPS (AltVivo next to other websites)
+
+When the same server also hosts other websites, neither stack can own ports 80/443. A small pass-through router does instead ([`edge-router/haproxy.cfg`](edge-router/haproxy.cfg)). It reads only the requested domain name and forwards the still-encrypted connection, so AltVivo and the other websites stay completely separate: each keeps its own containers, certificates and config.
+
+```
+internet :443 / :80
+      │
+  HAProxy (host service, owns 80/443, holds no certificates)
+      ├─ altvivo.bio, *.altvivo.bio ── TLS + PROXY v2 ──> 127.0.0.1:8443  AltVivo Caddy
+      ├─ any other domain (443) ───── TLS pass-through ─> 127.0.0.1:9443  other websites
+      └─ any other domain (80) ────── HTTP ────────────> 127.0.0.1:9080  other websites
+         (altvivo.bio on port 80 is redirected to https by HAProxy itself)
+```
+
+1. **AltVivo**: in `.env`, switch to router mode, then restart Caddy:
+   ```
+   CADDY_EDGE_MODE=router
+   CADDY_PUBLISH_HTTP=127.0.0.1:8080
+   CADDY_PUBLISH_HTTPS=127.0.0.1:8443
+   ```
+   ```bash
+   docker compose up -d caddy
+   ```
+   Caddy now listens on loopback only, reads the visitor's real IP from the PROXY header ([`caddy/edge/router.caddy`](caddy/edge/router.caddy)), and serves HTTP/1.1 + HTTP/2 (HTTP/3 needs UDP 443, which the router does not forward).
+2. **Other websites**: move their web server off the public ports to `127.0.0.1:9443` (HTTPS) and `127.0.0.1:9080` (HTTP). They keep issuing their own certificates: Let's Encrypt HTTP-01 challenges reach them through port 80. For Docker-based sites, publish as `"127.0.0.1:9443:443"` and `"127.0.0.1:9080:80"`. They see `127.0.0.1` as the client unless you enable the PROXY protocol for them (comment in `haproxy.cfg`); on port 80 they get `X-Forwarded-For`.
+3. **Router**:
+   ```bash
+   sudo apt-get install -y haproxy
+   ```
+   ```bash
+   sudo cp edge-router/haproxy.cfg /etc/haproxy/haproxy.cfg && sudo haproxy -c -f /etc/haproxy/haproxy.cfg
+   ```
+   ```bash
+   sudo systemctl enable --now haproxy && sudo systemctl reload haproxy
+   ```
+   If your AltVivo domain is not `altvivo.bio`, change the four `altvivo.bio` matches in `haproxy.cfg`.
+
+Also on a shared server:
+- **Don't copy `host/docker-daemon.json`** over an existing Docker configuration: it changes behaviour for every container on the host (`icc`, `no-new-privileges`, address pools). The AltVivo containers set their own hardening, so it is optional. Merge only the log settings if you want them.
+- **`scripts/ufw-setup.sh`** allows only SSH, 80 and 443, and drops any other port a container publishes on the public interface. Add rules afterwards for any other public ports the other websites need (mail, FTP, a control panel). Don't use `CLOUDFLARE_ONLY=1` unless every domain on the server is proxied through Cloudflare.
+- **Docker subnets**: AltVivo uses `172.30.0.0/24` (`APP_SUBNET`) and `172.30.10.0/24`. Make sure no existing Docker network uses them.
+- **Memory**: the AltVivo containers can use up to about 6.7 GB at their limits; size the VPS for both stacks.
+- **Backups**: `scripts/backup.sh` covers AltVivo only.
+
 ## Security controls in this module
 
 - **Exposure**: only `caddy` publishes ports. Postgres/Redis are on an `internal: true` network with no route in or out. Docker's DNAT bypasses ufw's INPUT chain, so `ufw-setup.sh` also filters the `DOCKER-USER` chain: any newly published port other than 80/443 is dropped at the host.
