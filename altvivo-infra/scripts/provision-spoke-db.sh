@@ -21,7 +21,7 @@ require_cmd docker
 PG_SUPERUSER="$(env_get POSTGRES_SUPERUSER || echo altvivo_admin)"
 var="$(upper "$app")_DB_PASSWORD"
 pw="$(env_get "$var")" || die "$var missing in .env (run: sudo ./scripts/generate-secrets.sh --spoke $app)"
-[[ "$pw" =~ ^[A-Za-z0-9]{32,256}$ ]] || die "$var must be 32-256 alphanumeric characters"
+[[ ${#pw} -ge 32 && ${#pw} -le 256 && "$pw" =~ ^[A-Za-z0-9]+$ ]] || die "$var must be 32-256 alphanumeric characters"
 
 psql_admin() { dc exec -T postgres psql -v ON_ERROR_STOP=1 -X -q -U "$PG_SUPERUSER" "$@"; }
 

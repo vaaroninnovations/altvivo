@@ -15,7 +15,9 @@ set -Eeuo pipefail
 
 die() { echo "[initdb] ERROR: $*" >&2; exit 1; }
 
-valid_secret() { [[ "$1" =~ ^[A-Za-z0-9]{32,256}$ ]]; }
+# Length is checked separately: the Postgres image is Alpine (musl), whose regex
+# engine rejects repeat counts above 255, so `{32,256}` would fail every value.
+valid_secret() { [[ ${#1} -ge 32 && ${#1} -le 256 && "$1" =~ ^[A-Za-z0-9]+$ ]]; }
 valid_ident()  { [[ "$1" =~ ^[a-z][a-z0-9_]{1,30}$ ]]; }
 
 for v in CORE_MIGRATOR_PASSWORD CORE_APP_PASSWORD CORE_READONLY_PASSWORD; do
