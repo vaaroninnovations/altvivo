@@ -3,7 +3,10 @@
 ARG CADDY_VERSION=2.10.0
 
 FROM caddy:${CADDY_VERSION}-builder-alpine AS builder
-RUN xcaddy build \
+# XCADDY_SETCAP=0: the builder image otherwise stamps cap_net_bind_service on
+# the binary, and a binary with file capabilities cannot be exec'd under
+# cap_drop: ALL + no-new-privileges ("exec caddy failed: Operation not permitted").
+RUN XCADDY_SETCAP=0 xcaddy build \
       --with github.com/caddy-dns/cloudflare \
       --with github.com/mholt/caddy-ratelimit \
       --with github.com/WeidiDeng/caddy-cloudflare-ip
