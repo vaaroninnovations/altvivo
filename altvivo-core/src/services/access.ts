@@ -27,12 +27,14 @@ const NONE: EntitlementClaim = { active: false, level: 'none', source: null, pla
 
 const TIER_BY_SOURCE: Record<EntitlementSource, AccessTier> = {
   vip: 'VIP',
+  trial: 'TRIAL',
+  payg: 'INDIVIDUAL',
   institution: 'INSTITUTIONAL',
   bundle: 'BUNDLE',
   individual: 'INDIVIDUAL',
   manual: 'INDIVIDUAL',
 };
-const TIER_ORDER: readonly AccessTier[] = ['NONE', 'INDIVIDUAL', 'BUNDLE', 'INSTITUTIONAL', 'VIP'];
+const TIER_ORDER: readonly AccessTier[] = ['NONE', 'TRIAL', 'INDIVIDUAL', 'BUNDLE', 'INSTITUTIONAL', 'VIP'];
 
 export interface BuildOptions {
   role: UserRole;

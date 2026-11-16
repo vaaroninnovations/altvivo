@@ -1,58 +1,58 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
-import Link from "next/link";
-import { SectionHeading, cx } from "@/components/ui";
-import { getCatalog, getPublicApps } from "@/lib/server/core";
+import { Gift } from "lucide-react";
+import { ButtonLink, SectionHeading } from "@/components/ui";
+import { getCatalog, getPublicApps, getTrialOffer } from "@/lib/server/core";
+import { trialLength } from "@/lib/trial";
 import { readSession } from "@/lib/server/session";
 import { PricingView } from "./pricing-table";
 
 export const metadata: Metadata = {
   title: "Pricing",
   description:
-    "XPRISM and aMaze licences: single-app, Dual-Suite bundle and institutional site licences. INR with GST invoices via Razorpay (UPI, cards, NetBanking) or USD via Stripe.",
+    "Start with one month free, then subscribe to XPRISM (Rs 20,000 a year for 100 students and 4 teachers) or aMaze (Rs 15,000 a year, or Rs 20 per animal / video). Prices in Indian rupees with GST invoices; pay by UPI, cards or NetBanking through Razorpay.",
 };
 
-export default async function PricingPage({ searchParams }: { searchParams: Promise<{ currency?: string; plan?: string; app?: string; seats?: string }> }) {
+export default async function PricingPage({ searchParams }: { searchParams: Promise<{ plan?: string; app?: string }> }) {
   const sp = await searchParams;
-  const country = (await headers()).get("cf-ipcountry")?.toUpperCase();
-  const currency: "INR" | "USD" = sp.currency === "INR" || sp.currency === "USD" ? sp.currency : country === "IN" ? "INR" : "USD";
-  const [catalog, apps, state] = await Promise.all([getCatalog(currency), getPublicApps(), readSession()]);
+  const currency = "INR" as const;
+  const [catalog, apps, state, offer] = await Promise.all([getCatalog(currency), getPublicApps(), readSession(), getTrialOffer()]);
   const s = state.session;
-  const keep = (c: string) => `/pricing?currency=${c}${sp.app ? `&app=${encodeURIComponent(sp.app)}` : ""}`;
 
   return (
     <div className="border-b border-line">
       <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:py-20">
         <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
-          <SectionHeading eyebrow="Pricing" title="Licences for researchers, labs and institutions">
-            Choose one application, both together at a bundle price, or a site licence for your department. Every purchase comes with a GST tax invoice.
+          <SectionHeading eyebrow="Pricing" title="One month free, then simple yearly pricing">
+            Start with {offer.days} days of full access at no cost. Afterwards subscribe to XPRISM, to aMaze, or to both: they are separate products.
+            Every purchase comes with a GST tax invoice.
           </SectionHeading>
-          <div className="flex flex-col items-start gap-2 lg:items-end">
-            <div role="group" aria-label="Currency" className="inline-flex rounded-full border border-line bg-surface p-1">
-              {(["INR", "USD"] as const).map((c) => (
-                <Link
-                  key={c}
-                  href={keep(c)}
-                  aria-current={currency === c ? "true" : undefined}
-                  scroll={false}
-                  className={cx("readout rounded-full px-4 py-1.5 text-sm transition", currency === c ? "bg-fg text-bg" : "text-muted hover:text-fg")}
-                >
-                  {c === "INR" ? "₹ INR" : "$ USD"}
-                </Link>
-              ))}
-            </div>
-            <p className="text-xs text-subtle">{currency === "INR" ? "Razorpay · UPI, cards, NetBanking · GST invoice" : "Stripe · cards worldwide · zero-rated export invoice"}</p>
+          <p className="readout text-xs text-subtle">Prices in ₹ INR · Razorpay · UPI, cards, NetBanking · GST invoice</p>
+        </div>
+
+        <div className="glow mt-10 flex flex-col gap-5 rounded-2xl border border-accent/30 bg-accent-soft p-6 sm:flex-row sm:items-center sm:p-7">
+          <span className="brand-gradient grid size-12 shrink-0 place-items-center rounded-xl text-white">
+            <Gift className="size-6" aria-hidden />
+          </span>
+          <div className="flex-1">
+            <p className="text-lg font-semibold">Not ready to pay? Take {trialLength(offer.days)} free.</p>
+            <p className="mt-1 text-sm text-muted">
+              Full access to {offer.apps.map((a) => a.name).join(" and ") || "every live application"} for {offer.days} days. No card needed and nothing is
+              charged when it ends; pick a plan below whenever you are ready.
+            </p>
           </div>
+          <ButtonLink href="/free-month" size="lg" className="shrink-0">
+            Request your free month
+          </ButtonLink>
         </div>
 
         {catalog ? (
           <PricingView
+            trialDays={offer.days}
             catalog={catalog}
             apps={apps.map((a) => ({ appId: a.appId, name: a.name, url: a.url, status: a.status, tagline: a.tagline }))}
             viewer={{ signedIn: !!s, emailVerified: s?.emailVerified ?? false, email: s?.email ?? null, role: s?.role ?? null, hasOrg: !!s?.orgId, name: s?.name ?? null }}
             preselectPlan={sp.plan ?? null}
             focusApp={sp.app ?? null}
-            initialSeats={Number(sp.seats) || null}
           />
         ) : (
           <p role="status" className="mt-12 rounded-2xl border border-line bg-surface p-8 text-center text-muted">

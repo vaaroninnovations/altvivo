@@ -43,9 +43,7 @@ export const viewerOf = (s: Session) => ({
   hasOrg: !!s.orgId,
 });
 
-/** Display currency for price lists: India -> INR, elsewhere USD (billing follows the billing address). */
-export async function requestCurrency(explicit?: string | string[]): Promise<"INR" | "USD"> {
-  if (explicit === "INR" || explicit === "USD") return explicit;
-  const { headers } = await import("next/headers");
-  return (await headers()).get("cf-ipcountry")?.toUpperCase() === "IN" ? "INR" : "USD";
+/** Price lists and billing are in Indian rupees only. */
+export async function requestCurrency(_explicit?: string | string[]): Promise<"INR"> {
+  return "INR";
 }

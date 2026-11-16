@@ -9,10 +9,9 @@ import { MobileNav } from "./mobile-nav";
 import { ButtonLink } from "./ui";
 
 export const NAV = [
-  { href: "/#apps", label: "Applications" },
-  { href: "/advisory-board", label: "Advisory Board" },
+  { href: "/about", label: "About us" },
   { href: "/pricing", label: "Pricing" },
-  { href: "/pricing#institutional", label: "Institutions" },
+  { href: "/docs", label: "Documentation" },
 ];
 
 /** Public header. `absolute` builds full portal URLs (used on app subdomains). */
@@ -22,11 +21,11 @@ export async function SiteHeader({ absolute = false }: { absolute?: boolean }) {
   return (
     <header className="sticky top-0 z-40 border-b border-line/80 bg-bg/75 backdrop-blur-xl backdrop-saturate-150">
       <div className="brand-gradient h-0.5 w-full" aria-hidden />
-      <div className="mx-auto flex h-[4.25rem] max-w-7xl items-center gap-6 px-4 sm:px-6">
+      <div className="relative mx-auto flex h-[4.25rem] max-w-7xl items-center gap-6 px-4 sm:px-6">
         <a href={href("/")} className="shrink-0" aria-label="AltVivo home">
           <Logo />
         </a>
-        <nav aria-label="Main" className="hidden items-center gap-1 lg:flex">
+        <nav aria-label="Main" className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 lg:flex">
           {NAV.map((n) => (
             <a key={n.href} href={href(n.href)} className="rounded-lg px-3 py-2 text-sm text-muted transition hover:bg-surface-2 hover:text-fg">
               {n.label}
@@ -46,8 +45,8 @@ export async function SiteHeader({ absolute = false }: { absolute?: boolean }) {
               <a href={href("/login")} className="hidden whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium text-muted hover:text-fg sm:inline">
                 Sign in
               </a>
-              <ButtonLink href={href("/pricing")} size="sm" external={absolute}>
-                Get started <ArrowRight className="size-4" aria-hidden />
+              <ButtonLink href={href("/free-month")} size="sm" external={absolute}>
+                Start free <ArrowRight className="size-4" aria-hidden />
               </ButtonLink>
             </>
           )}
@@ -93,12 +92,14 @@ export function SiteFooter({ absolute = false }: { absolute?: boolean }) {
         {col("Platform", [
           ["XPRISM", "https://xprism.altvivo.bio"],
           ["aMaze", "https://amaze.altvivo.bio"],
+          ["One month free", href("/free-month")],
           ["Pricing", href("/pricing")],
-          ["Advisory Board", href("/advisory-board")],
+          ["Documentation", href("/docs")],
         ])}
         {col("Company", [
+          ["About us", href("/about")],
+          ["Advisory Board", href("/about#advisory-board")],
           ["Contact", href("/contact")],
-          ["Institutional sales", href("/pricing#institutional")],
           ["Workspace", href("/workspace")],
           ["Sign in", href("/login")],
         ])}

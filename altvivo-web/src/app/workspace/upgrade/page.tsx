@@ -6,7 +6,7 @@ import { UpgradeView } from "./upgrade-view";
 
 export const metadata = { title: "Unlock an application" };
 
-/** Target of the paid gate: /workspace/upgrade?app=<id>&reason=subscription_required|subscription_expired */
+/** Target of the access gate (free month over, or no plan): /workspace/upgrade?app=<id>&reason=subscription_required|subscription_expired */
 export default async function UpgradePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const { session, data } = await loadProtected<WorkspaceData>("/workspace/upgrade", sp, "/v1/api/workspace");
@@ -19,6 +19,8 @@ export default async function UpgradePage({ searchParams }: { searchParams: Prom
       apps={live}
       catalog={catalog}
       viewer={viewerOf(session)}
+      trial={data.trial}
+      trialDays={data.trialDays}
       reason={typeof sp.reason === "string" ? sp.reason : null}
       cancelled={sp.status === "cancelled"}
     />

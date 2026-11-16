@@ -74,7 +74,7 @@ export const APPS: readonly AppSeed[] = [
       'Upload rodent behavioural assay videos and get markerless tracking, automatic arena and ROI detection, trajectory metrics and occupancy heatmaps.',
     status: 'LIVE',
     version: '1.0.0',
-    requiresCredits: false,
+    requiresCredits: true, // sold per use as well: one credit = one animal / video analysed
     phase: 1,
     sortOrder: 20,
     iconKey: 'scan-eye',
@@ -144,8 +144,11 @@ export const APPS: readonly AppSeed[] = [
   },
 ];
 
-// Launch price list. Minor units (paise / cents), GST excluded (18 % is added
-// at checkout for Indian customers; exports are zero-rated under LUT).
+// Price list. Minor units (paise / cents), GST excluded (18 % is added at
+// checkout). XPRISM and aMaze are sold separately as yearly subscriptions and
+// are the only public plans; the monthly plans, the Dual-Suite bundle and the
+// institutional site licence are kept (isPublic: false) for existing records
+// and for licences a SUPERADMIN arranges by hand.
 // SAC 997331: licensing services for the right to use computer software.
 export const PLANS: readonly PlanSeed[] = [
   {
@@ -156,20 +159,21 @@ export const PLANS: readonly PlanSeed[] = [
     interval: 'MONTH',
     priceInrPaise: 1_49_900,
     priceUsdCents: 2_400,
-    sortOrder: 10,
+    isPublic: false,
+    sortOrder: 15,
     features: ['Full XPRISM access', 'All 40+ virtual experiments', 'Experiment reports & exports', 'Cancel any time'],
     apps: ['xprism'],
   },
   {
     planCode: 'xprism_annual',
-    name: 'XPRISM (annual)',
-    description: 'Single-app licence for the XPRISM virtual pharmacology lab, billed yearly.',
+    name: 'XPRISM',
+    description: 'Annual subscription to the XPRISM virtual pharmacology laboratory for one account: up to 100 students and 4 teachers.',
     kind: 'SINGLE_APP',
     interval: 'YEAR',
-    priceInrPaise: 14_99_000,
+    priceInrPaise: 20_00_000,
     priceUsdCents: 24_000,
-    sortOrder: 11,
-    features: ['Full XPRISM access', 'All 40+ virtual experiments', 'Experiment reports & exports', '2 months free vs monthly'],
+    sortOrder: 10,
+    features: ['Up to 100 students per account', 'Up to 4 teachers per account', 'All 40+ virtual experiments', 'Assignments, batches and marks sheets', 'Experiment reports & exports'],
     apps: ['xprism'],
   },
   {
@@ -180,20 +184,21 @@ export const PLANS: readonly PlanSeed[] = [
     interval: 'MONTH',
     priceInrPaise: 1_99_900,
     priceUsdCents: 2_900,
-    sortOrder: 20,
+    isPublic: false,
+    sortOrder: 25,
     features: ['Full aMaze access', 'Markerless tracking & heatmaps', 'CSV / JSON export', 'Cancel any time'],
     apps: ['amaze'],
   },
   {
     planCode: 'amaze_annual',
-    name: 'aMaze (annual)',
-    description: 'Single-app licence for aMaze rodent behaviour video tracking, billed yearly.',
+    name: 'aMaze',
+    description: 'Annual subscription to aMaze rodent behaviour video tracking, with unlimited videos.',
     kind: 'SINGLE_APP',
     interval: 'YEAR',
-    priceInrPaise: 19_99_000,
+    priceInrPaise: 15_00_000,
     priceUsdCents: 29_000,
-    sortOrder: 21,
-    features: ['Full aMaze access', 'Markerless tracking & heatmaps', 'CSV / JSON export', '2 months free vs monthly'],
+    sortOrder: 20,
+    features: ['Unlimited animals and videos for 12 months', 'Markerless tracking & heatmaps', 'Open field, EPM, Y-maze, MWM', 'CSV / JSON export'],
     apps: ['amaze'],
   },
   {
@@ -204,7 +209,7 @@ export const PLANS: readonly PlanSeed[] = [
     interval: 'MONTH',
     priceInrPaise: 2_99_900,
     priceUsdCents: 4_500,
-    highlighted: true,
+    isPublic: false,
     sortOrder: 30,
     features: ['Full XPRISM access', 'Full aMaze access', 'One login, one invoice', 'Save 14 % vs two single-app plans'],
     apps: ['xprism', 'amaze'],
@@ -217,7 +222,7 @@ export const PLANS: readonly PlanSeed[] = [
     interval: 'YEAR',
     priceInrPaise: 29_99_000,
     priceUsdCents: 45_000,
-    highlighted: true,
+    isPublic: false,
     sortOrder: 31,
     features: ['Full XPRISM access', 'Full aMaze access', 'One login, one invoice', '2 months free vs monthly'],
     apps: ['xprism', 'amaze'],
@@ -234,6 +239,7 @@ export const PLANS: readonly PlanSeed[] = [
     priceUsdCents: 6_000,
     minSeats: 25,
     maxSeats: null,
+    isPublic: false,
     sortOrder: 40,
     features: [
       'XPRISM & aMaze for every seat',

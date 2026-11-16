@@ -17,6 +17,11 @@ export interface LegalInfo {
   grievanceName: string;
   grievanceEmail: string;
   grievancePhone: string;
+  /** Shown on /about; empty until LEGAL_FOUNDER_NAME is set. */
+  founderName: string;
+  founderRole: string;
+  /** Paragraphs separated by a blank line (literal "\n\n" in .env). */
+  founderBio: string;
   /** City whose courts have jurisdiction (Terms). */
   jurisdictionCity: string;
 }
@@ -37,6 +42,9 @@ export function legalInfo(): LegalInfo {
     grievanceName: env("LEGAL_GRIEVANCE_OFFICER_NAME", "Grievance Officer"),
     grievanceEmail: env("LEGAL_GRIEVANCE_OFFICER_EMAIL", "grievance@altvivo.bio"),
     grievancePhone: env("LEGAL_GRIEVANCE_OFFICER_PHONE"),
+    founderName: env("LEGAL_FOUNDER_NAME"),
+    founderRole: env("LEGAL_FOUNDER_ROLE", `Started and leads ${entity}`),
+    founderBio: env("LEGAL_FOUNDER_BIO").replace(/\\n/g, "\n"),
     jurisdictionCity: env("LEGAL_JURISDICTION_CITY", "Bengaluru"),
   };
 }

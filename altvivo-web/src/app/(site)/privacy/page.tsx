@@ -70,7 +70,7 @@ export default function PrivacyPage() {
         <li>Your research data (experiment work, uploaded videos, results, files) belongs to you and is used only to provide the service to you.</li>
         <li>We do not sell personal data and do not use your research data to train machine-learning models.</li>
         <li>One sign-in works across AltVivo subdomains through strictly necessary cookies; optional cookies are used only with your consent.</li>
-        <li>Card, UPI and bank details are handled by Razorpay or Stripe; we never see or store them.</li>
+        <li>Card, UPI and bank details are handled by Razorpay; we never see or store them.</li>
         <li>You can access, correct and erase your data, withdraw consent and raise a grievance at any time.</li>
       </ul>
 
@@ -91,7 +91,7 @@ export default function PrivacyPage() {
       <p>
         Your licences and their periods; the billing details you enter for GST invoices (name, address, state, postal code, country, optional phone and GSTIN);
         invoices, proforma invoices and credit notes; and payment records (amount, currency, method such as &quot;upi&quot; or &quot;card&quot;, status and
-        the processor&apos;s reference). Card numbers, UPI handles and bank-account details are collected directly by Razorpay or Stripe under their own privacy
+        the processor&apos;s reference). Card numbers, UPI handles and bank-account details are collected directly by Razorpay under its own privacy
         policies.
       </p>
       <h3>3.4 Use of the applications</h3>
@@ -103,7 +103,9 @@ export default function PrivacyPage() {
       </p>
       <h3>3.5 Communications and consent</h3>
       <p>
-        Messages you send us through contact forms or email, early-access waitlist sign-ups (email address and the application), and records of your cookie
+        Messages you send us through contact forms or email, requests for one month of free access (your name, email address, institution, role, the
+        applications you asked for and how you plan to use them, kept as the record of who received a free month), early-access waitlist sign-ups (email
+        address and the application), and records of your cookie
         choices (a random identifier stored in your browser, the choices, the policy version, the time, your browser user agent and a one-way hash of your IP
         address).
       </p>
@@ -197,7 +199,7 @@ export default function PrivacyPage() {
       <p>We share only what each recipient needs, under contracts that require them to protect it:</p>
       <ul>
         <li>
-          <strong>Payment processors:</strong> Razorpay (India) and Stripe (outside India), to take payments and handle refunds.
+          <strong>Payment processor:</strong> Razorpay, to take payments and handle refunds.
         </li>
         <li>
           <strong>Cloudflare:</strong> network delivery and protection, DNS, bot verification on sign-in and sign-up forms (Turnstile), and encrypted object

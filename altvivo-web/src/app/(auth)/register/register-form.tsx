@@ -24,10 +24,10 @@ function strength(pw: string): { score: number; label: string } {
   return { score: s, label: ["Too short", "Weak", "Fair", "Good", "Strong"][s] ?? "Strong" };
 }
 
-export function RegisterForm({ next, oauthPendingId }: { next: string; oauthPendingId: string | null }) {
+export function RegisterForm({ next, oauthPendingId, defaultEmail = "", freeMonth = false }: { next: string; oauthPendingId: string | null; defaultEmail?: string; freeMonth?: boolean }) {
   const [pending, setPending] = useState<Pending | null>(null);
   const [pendingError, setPendingError] = useState<string | null>(null);
-  const [form, setForm] = useState({ fullName: "", email: "", password: "", affiliation: "", role: "RESEARCHER" });
+  const [form, setForm] = useState({ fullName: "", email: defaultEmail, password: "", affiliation: "", role: "RESEARCHER" });
   const [agree, setAgree] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -92,6 +92,18 @@ export function RegisterForm({ next, oauthPendingId }: { next: string; oauthPend
       </p>
 
       <div className="mt-8 space-y-6">
+        {freeMonth ? (
+          <Alert tone="success" title="Your free month is approved">
+            Create your account with the email address we approved{defaultEmail ? <> (<span className="readout">{defaultEmail}</span>)</> : null} and verify it. Your free access starts at that moment.
+          </Alert>
+        ) : (
+          <p className="rounded-xl border border-accent/30 bg-accent-soft px-4 py-3 text-sm text-muted">
+            New here? Your first month can be free.{" "}
+            <Link href="/free-month" className="font-medium text-accent-ink hover:underline">
+              Request one month free
+            </Link>
+          </p>
+        )}
         {pending && (
           <Alert tone="info" title={`Linking your ${pending.provider === "ORCID" ? "ORCID iD" : "Google account"}`}>
             {pending.orcidId ? <span className="readout">{pending.orcidId}</span> : null} Add your email to finish. A password is optional.
@@ -109,7 +121,7 @@ export function RegisterForm({ next, oauthPendingId }: { next: string; oauthPend
           <Field label="Full name" id="fullName" error={fields.fullName}>
             <input id="fullName" className="field" autoComplete="name" required value={form.fullName} onChange={set("fullName")} aria-invalid={!!fields.fullName} />
           </Field>
-          <Field label="Email" id="email" error={fields.email} hint="Use your institutional email to join your college's licence automatically.">
+          <Field label="Email" id="email" error={fields.email} hint="Use the address your college or lab knows you by.">
             <input id="email" type="email" className="field" autoComplete="email" inputMode="email" required value={form.email} onChange={set("email")} aria-invalid={!!fields.email} />
           </Field>
           <div className="grid gap-5 sm:grid-cols-2">

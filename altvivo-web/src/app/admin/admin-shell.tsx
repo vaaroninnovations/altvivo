@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, FileText, Gauge, Inbox, KeyRound, LayoutGrid, ScrollText, Users, UserSquare2, Wallet } from "lucide-react";
+import { Building2, FileText, Gauge, Gift, Inbox, KeyRound, LayoutGrid, Mail, ScrollText, Users, UserSquare2, Wallet } from "lucide-react";
 import { SignerProvider } from "@/components/admin/kit";
 import { Alert, cx } from "@/components/ui";
 
 const NAV = [
   { href: "/admin", label: "Dashboard", Icon: Gauge },
+  { href: "/admin/mail", label: "Mailbox", Icon: Mail },
+  { href: "/admin/trials", label: "Free-month requests", Icon: Gift },
   { href: "/admin/users", label: "Users", Icon: Users },
   { href: "/admin/licences", label: "Manual licences", Icon: KeyRound },
   { href: "/admin/institutions", label: "Institutions", Icon: Building2 },
@@ -15,7 +17,7 @@ const NAV = [
   { href: "/admin/payments", label: "Payments", Icon: Wallet },
   { href: "/admin/apps", label: "Apps & pricing", Icon: LayoutGrid },
   { href: "/admin/advisory", label: "Advisory board", Icon: UserSquare2 },
-  { href: "/admin/contact", label: "Contact inbox", Icon: Inbox },
+  { href: "/admin/contact", label: "Contact enquiries", Icon: Inbox },
   { href: "/admin/audit", label: "Audit log", Icon: ScrollText },
 ];
 

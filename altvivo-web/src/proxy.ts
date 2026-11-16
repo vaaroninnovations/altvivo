@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from "next/server";
 const API = process.env.NEXT_PUBLIC_API_URL ?? "https://api.altvivo.bio";
 const EMBED = new URL(process.env.NEXT_PUBLIC_EMBED_URL ?? "https://embed.altvivo.bio/bar.js").origin;
 const DEV = process.env.NODE_ENV !== "production";
+/** Google Analytics hosts are allowed only when a measurement ID is configured. */
+const ga = () => /^G-[A-Z0-9]{4,16}$/.test((process.env.GA_MEASUREMENT_ID ?? "").trim());
 
 /**
  * Per-request nonce Content-Security-Policy. Next.js reads the nonce from the
@@ -13,12 +15,12 @@ export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
   const csp = [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://challenges.cloudflare.com https://checkout.razorpay.com ${EMBED}${DEV ? " 'unsafe-eval'" : ""}`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://challenges.cloudflare.com https://checkout.razorpay.com ${EMBED}${ga() ? " https://www.googletagmanager.com" : ""}${DEV ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
     // Advisory-board portraits are served from the CMS media origin (any https CDN).
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
-    `connect-src 'self' ${API} https://challenges.cloudflare.com https://api.razorpay.com https://lumberjack.razorpay.com https://*.r2.cloudflarestorage.com${DEV ? " ws: http://localhost:*" : ""}`,
+    `connect-src 'self' ${API} https://challenges.cloudflare.com https://api.razorpay.com https://lumberjack.razorpay.com https://*.r2.cloudflarestorage.com${ga() ? " https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com" : ""}${DEV ? " ws: http://localhost:*" : ""}`,
     "frame-src https://challenges.cloudflare.com https://api.razorpay.com https://checkout.razorpay.com",
     "frame-ancestors 'self'",
     `form-action 'self' ${API}`,

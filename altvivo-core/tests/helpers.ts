@@ -197,10 +197,17 @@ export async function createTestContext(env: Record<string, string> = {}): Promi
   return { app, deps, cfg, mailer, storage, google, orcid, stripe, razorpay };
 }
 
+/** A different client address for every Browser, so per-IP rate limits never collide between tests. */
+let ipCounter = 0;
+function nextTestIp(): string {
+  ipCounter += 1;
+  return `203.0.${113 + Math.floor(ipCounter / 250)}.${(ipCounter % 250) + 1}`;
+}
+
 /** Minimal cookie jar for app.inject(), honouring Path for the refresh cookie. */
 export class Browser {
   cookies = new Map<string, { value: string; path: string }>();
-  constructor(private readonly app: FastifyInstance, readonly ip = `203.0.113.${Math.floor(Math.random() * 250) + 1}`) {}
+  constructor(private readonly app: FastifyInstance, readonly ip = nextTestIp()) {}
 
   absorb(res: LightMyRequestResponse) {
     const raw = res.headers['set-cookie'];

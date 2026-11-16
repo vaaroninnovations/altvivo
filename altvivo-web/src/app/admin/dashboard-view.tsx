@@ -17,6 +17,8 @@ interface Dashboard {
   revenueLast30Days: { currency: Currency; grossMinor: number; taxMinor: number; refundedMinor: number; netMinor: number; payments: number }[];
   users: { total: number; verified: number; new30: number; disabled: number };
   openProformas: { currency: Currency; count: number; totalMinor: number }[];
+  freeMonth: { pending: number; approved: number; active: number; ended: number; declined: number };
+  mailbox: { unread: number };
 }
 
 const APP_NAME: Record<string, string> = { xprism: "XPRISM", amaze: "aMaze", pharmadme: "PharmADME", stat: "Stat 'O' Mate AI", phytonet: "PhytoNet AI", mira: "MIRA" };
@@ -32,7 +34,7 @@ export function DashboardView() {
     <>
       <PageHeader
         title="Revenue & telemetry"
-        description="Recurring revenue is GST-exclusive and covers subscriptions in force. Manual (offline) licences appear in revenue when their payment is recorded."
+        description="Recurring revenue is GST-exclusive and covers subscriptions in force. Manual (offline) licences appear in revenue when their payment is recorded; free months earn nothing and are counted on their own."
         actions={
           <Button variant="outline" size="sm" onClick={reload} loading={loading}>
             <RefreshCw className="size-4" aria-hidden /> Refresh
@@ -43,10 +45,10 @@ export function DashboardView() {
       {data && (
         <div className="space-y-8">
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {(["INR", "USD"] as const).map((c) => (
+            {(["INR"] as const).map((c) => (
               <Kpi
                 key={c}
-                label={`MRR · ${c}`}
+                label="Monthly recurring revenue"
                 tone="accent"
                 value={formatMoney(rr(c)?.mrrMinor ?? 0, c, { round: true })}
                 sub={`ARR ${formatMoney(rr(c)?.arrMinor ?? 0, c, { round: true })} · ${rr(c)?.subscriptions ?? 0} subscriptions`}
@@ -62,6 +64,22 @@ export function DashboardView() {
             ))}
             <Kpi label="Dual-Suite bundles" value={num(kind("BUNDLE")?.subs ?? 0)} sub={`${num(kind("SINGLE_APP")?.subs ?? 0)} single-app subscriptions`} />
             <Kpi label="Site licences (online)" value={num(kind("SITE_LICENSE")?.subs ?? 0)} sub={`${num(kind("SITE_LICENSE")?.seats ?? 0)} seats`} />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <Link href="/admin/trials" className="block rounded-2xl transition hover:-translate-y-0.5">
+              <Kpi
+                label="Free-month requests waiting"
+                tone={data.freeMonth.pending ? "soon" : undefined}
+                value={num(data.freeMonth.pending)}
+                sub={`${num(data.freeMonth.approved)} approved, not started yet`}
+              />
+            </Link>
+            <Kpi label="Free months running" tone="live" value={num(data.freeMonth.active)} sub={`${num(data.freeMonth.ended)} finished · ${num(data.freeMonth.declined)} declined`} />
+            <Link href="/admin/mail" className="block rounded-2xl transition hover:-translate-y-0.5">
+              <Kpi label="Unread mail" tone={data.mailbox.unread ? "accent" : undefined} value={num(data.mailbox.unread)} sub="Enquiries, free-month requests and replies" />
+            </Link>
+            <Kpi label="Licensed · total" value={num((lic("xprism")?.holders ?? 0) + (lic("amaze")?.holders ?? 0))} sub="Paid and manual licences; free months are counted separately" />
           </div>
 
           <div className="grid gap-6 xl:grid-cols-2">

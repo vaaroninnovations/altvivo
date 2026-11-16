@@ -9,6 +9,7 @@ import { actorOf, parse, requireUser } from '../plugins/security.js';
 import { buildEntitlements, loadAccess, toApiEntitlements } from '../services/access.js';
 import { listApps } from '../services/registry.js';
 import { MFA_REQUIRED_ROLES } from '../services/sessions.js';
+import { toApiTrial, trialForEmail } from '../services/trials.js';
 import { publicUser } from './auth.js';
 
 const ProfileBody = z
@@ -51,7 +52,7 @@ export default async function meRoutes(app: FastifyInstance, d: Deps) {
   app.get('/v1/api/workspace', opts, async (req) => {
     const claims = req.auth!;
     const user = await d.prisma.user.findUniqueOrThrow({ where: { id: claims.sub }, select: { role: true, mfaEnabled: true, disabledAt: true } });
-    const [apps, rows, waitlist, files, activity, credits] = await Promise.all([
+    const [apps, rows, waitlist, files, activity, credits, trial] = await Promise.all([
       listApps(d.prisma, d.redis),
       loadAccess(d.prisma, claims.sub),
       d.prisma.appWaitlist.findMany({ where: { OR: [{ userId: claims.sub }, { email: claims.email }] }, select: { appId: true } }),
@@ -68,6 +69,7 @@ export default async function meRoutes(app: FastifyInstance, d: Deps) {
         select: { id: true, timestamp: true, appId: true, eventType: true, resourceId: true, metadata: true },
       }),
       d.prisma.$queryRaw<{ balance: number }[]>`SELECT credit_balance_for_user(${claims.sub}::uuid) AS balance`,
+      trialForEmail(d, claims.email),
     ]);
     // Live view (not the possibly 15-minute-old token) so a purchase shows at once.
     const { entitlements } = buildEntitlements(rows, {
@@ -80,6 +82,9 @@ export default async function meRoutes(app: FastifyInstance, d: Deps) {
     return {
       user: publicUser(claims),
       creditsRemaining: Number(credits[0]?.balance ?? 0),
+      /** The person's "one month free" request, if any, and the length currently offered. */
+      trial: trial ? toApiTrial(trial) : null,
+      trialDays: d.cfg.TRIAL_DAYS,
       apps: apps.map((a) => ({
         ...a,
         entitlement: api[a.appId] ?? { active: false, level: 'none', source: null, plan: null, expiresAt: null },

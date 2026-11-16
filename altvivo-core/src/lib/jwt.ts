@@ -3,10 +3,11 @@ import { SignJWT, decodeJwt, decodeProtectedHeader, exportJWK, importPKCS8, impo
 import type { UserRole } from '@prisma/client';
 import type { Config } from '../config.js';
 
-export type EntitlementSource = 'individual' | 'bundle' | 'institution' | 'manual' | 'vip';
+export type EntitlementSource = 'trial' | 'payg' | 'individual' | 'bundle' | 'institution' | 'manual' | 'vip';
 
 /**
- * Paid access to one app (altvivo-infra/CONTRACTS.md section 1). Spokes and
+ * Access to one app - paid, or the one-month free access (`source: 'trial'`)
+ * (altvivo-infra/CONTRACTS.md section 1). Spokes and
  * /v1/auth/verify allow access only when `active === true` and `expires_at`
  * is null or in the future.
  */
@@ -19,7 +20,7 @@ export interface EntitlementClaim {
   expires_at: number | null;
 }
 
-export type AccessTier = 'NONE' | 'INDIVIDUAL' | 'BUNDLE' | 'INSTITUTIONAL' | 'VIP';
+export type AccessTier = 'NONE' | 'TRIAL' | 'INDIVIDUAL' | 'BUNDLE' | 'INSTITUTIONAL' | 'VIP';
 
 /** Claims the IdP computes for a session (spec section 3.1 plus session binding). */
 export interface SessionClaims {

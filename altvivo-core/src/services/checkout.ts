@@ -7,6 +7,7 @@ import { affectedUsers } from './access.js';
 import type { StripeSubscription } from './billing.js';
 import { mapStripeStatus } from './billing.js';
 import { ledgerEntryExists, postLedger } from './credits.js';
+import { USAGE_PURCHASE, USAGE_REFUND, isUsageLine } from './usage.js';
 import {
   addInterval,
   createDraft,
@@ -90,6 +91,9 @@ export type CheckoutResponse =
  * provider metadata carries only the invoice id.
  */
 export async function startCheckout(d: Deps, actor: AuditActor, s: StartCheckout): Promise<CheckoutResponse> {
+  if (s.profile.country !== 'IN' && !d.cfg.USD_BILLING_ENABLED) {
+    throw conflict('INDIA_BILLING_ONLY', 'We bill in Indian rupees to billing addresses in India. For other countries, please contact sales@altvivo.bio');
+  }
   const currency = s.profile.country === 'IN' ? 'INR' : 'USD';
   const provider: PaymentProviderId = currency === 'INR' ? 'RAZORPAY' : 'STRIPE';
   if (!d.billing[provider].enabled) throw conflict('PROVIDER_UNAVAILABLE', `Online payment in ${currency} is not available yet - contact sales@altvivo.bio`);
@@ -190,9 +194,21 @@ export async function finalizeOneTime(d: Deps, invoiceId: string, p: CapturedPay
     }
 
     const line = inv.lines[0]!;
+    const now = new Date();
+    if (isUsageLine(line)) {
+      // Pay per use: the paid analyses become credits of the buyer (their institution's pool when they belong to one).
+      const issued = await issue(tx, invoiceId, { paidAt: now });
+      await tx.payment.create({ data: { ...base, invoiceId, taxMinor: taxOf(issued), description: `${line.description.split(' - ')[0]} - ${issued.number}`, metadata: { pay_per_use: line.appId, analyses: line.quantity } } });
+      const buyer = await tx.user.findUniqueOrThrow({ where: { id: owner.userId! }, select: { orgId: true } });
+      const entry = await postLedger(tx, { userId: owner.userId, orgId: buyer.orgId, appId: line.appId, actionType: USAGE_PURCHASE, delta: line.quantity, referenceId: `invoice:${issued.number}` });
+      await audit(tx, 'BILLING.PAYMENT_CAPTURED', invoiceId, {
+        provider: p.provider, payment: p.providerPaymentId, invoice: issued.number, pay_per_use: line.appId, analyses: line.quantity,
+        balance: entry.balanceAfter, total_minor: issued.totalMinor.toString(), currency: issued.currency,
+      });
+      return { status: 'activated', invoiceId, subscriptionId: null, owner };
+    }
     const plan = await tx.plan.findUniqueOrThrow({ where: { planCode: line.planCode! } });
     const seats = plan.pricingModel === 'PER_SEAT' ? line.quantity : 1;
-    const now = new Date();
     const start = await termStart(tx, owner, plan.planCode, now);
     const end = addInterval(start, plan.interval);
     const sub = await tx.subscription.create({
@@ -376,6 +392,16 @@ export async function applyRefund(d: Deps, provider: PaymentProviderId, provider
         if (inv && inv.kind === 'TAX_INVOICE' && inv.status !== 'CANCELLED' && credited === 0) {
           creditNote = (await fullCreditNote(tx, inv, 'Payment refunded in full.', null)).id;
         }
+        const line = inv?.lines[0];
+        if (inv && line && isUsageLine(line) && pay.userId) {
+          // Refunded analyses are withdrawn; those already used cannot be (the balance never goes below zero).
+          const buyer = await tx.user.findUniqueOrThrow({ where: { id: pay.userId }, select: { orgId: true } });
+          const [{ balance } = { balance: 0 }] = await tx.$queryRaw<{ balance: number }[]>`SELECT credit_balance_for_user(${pay.userId}::uuid) AS balance`;
+          const take = Math.min(line.quantity, Number(balance));
+          if (take > 0 && !(await ledgerEntryExists(tx, { userId: pay.userId, orgId: buyer.orgId }, USAGE_REFUND, `invoice:${inv.number}`))) {
+            await postLedger(tx, { userId: pay.userId, orgId: buyer.orgId, appId: line.appId, actionType: USAGE_REFUND, delta: -take, referenceId: `invoice:${inv.number}` });
+          }
+        }
       }
     }
     await audit(tx, full ? 'BILLING.REFUND_FULL' : 'BILLING.REFUND_PARTIAL', pay.id, {
@@ -415,6 +441,9 @@ export async function createProforma(tx: Tx, d: Deps, i: ProformaInput): Promise
   if (i.plan.kind !== 'SITE_LICENSE') throw new HttpError(409, 'NOT_A_SITE_LICENCE', 'Proformas are issued for site licences');
   if (i.seats < i.plan.minSeats || (i.plan.maxSeats !== null && i.seats > i.plan.maxSeats)) {
     throw new HttpError(400, 'SEATS_OUT_OF_RANGE', `This licence is sold for ${i.plan.minSeats}${i.plan.maxSeats ? `-${i.plan.maxSeats}` : '+'} seats`);
+  }
+  if (i.profile.country !== 'IN' && !d.cfg.USD_BILLING_ENABLED) {
+    throw conflict('INDIA_BILLING_ONLY', 'We bill in Indian rupees to billing addresses in India. For other countries, please contact sales@altvivo.bio');
   }
   const currency = i.profile.country === 'IN' ? 'INR' : 'USD';
   const apps = await planApps(tx, i.plan.planCode);

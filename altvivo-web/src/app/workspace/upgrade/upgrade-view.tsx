@@ -1,21 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeft, Building2, Check, Lock, Rocket } from "lucide-react";
+import { ArrowLeft, Check, Gift, Lock, Rocket } from "lucide-react";
 import { AppIcon, AppLogo, hasAppLogo } from "@/components/brand";
 import { CheckoutDialog, type Viewer } from "@/components/checkout";
 import { Alert, ButtonLink, Card, StatusBadge, entitled, formatDate } from "@/components/ui";
+import { TrialStatus } from "@/components/trial";
 import { PlanOptions } from "@/components/unlock";
-import type { CatalogPlan, CatalogResponse, WorkspaceApp } from "@/lib/types";
+import { trialLength, trialState } from "@/lib/trial";
+import type { CatalogPlan, CatalogResponse, Trial, WorkspaceApp } from "@/lib/types";
 
 const REASON: Record<string, { title: string; body: (app: string) => string }> = {
   subscription_required: {
-    title: "A licence is required",
-    body: (app) => `Your AltVivo account does not hold an active ${app} licence yet. Choose a plan below. Access opens as soon as payment completes.`,
+    title: "A plan is required",
+    body: (app) => `Your AltVivo account does not have access to ${app} at the moment. Choose a plan below. Access opens as soon as payment completes.`,
   },
   subscription_expired: {
-    title: "Your licence has ended",
-    body: (app) => `Your ${app} licence period is over. Renew to continue where you left off; your data and exports are kept.`,
+    title: "Your access has ended",
+    body: (app) => `Your ${app} access period is over. Choose a plan to continue where you left off; your data and exports are kept.`,
   },
 };
 
@@ -26,7 +28,11 @@ export function UpgradeView({
   viewer,
   reason,
   cancelled,
+  trial,
+  trialDays,
 }: {
+  trial: Trial | null;
+  trialDays: number;
   app: WorkspaceApp | null;
   apps: WorkspaceApp[];
   catalog: CatalogResponse | null;
@@ -56,6 +62,8 @@ export function UpgradeView({
 
   const ok = entitled(app.entitlement) || activated;
   const r = REASON[reason ?? ""] ?? REASON.subscription_required!;
+  const where = trialState(trial);
+  const canAskFree = where === "none" || where === "declined";
 
   return (
     <div className="space-y-8">
@@ -92,7 +100,9 @@ export function UpgradeView({
           {ok ? (
             <Card className="p-7">
               <Alert tone="success" title={`${app.name} is unlocked`}>
-                {app.entitlement.expiresAt && !activated ? `Your licence is valid until ${formatDate(app.entitlement.expiresAt)}.` : "Your licence is active."}
+                {app.entitlement.expiresAt && !activated
+                  ? `${app.entitlement.source === "trial" ? "Your free month runs" : "Your licence is valid"} until ${formatDate(app.entitlement.expiresAt)}.`
+                  : "Your licence is active."}
               </Alert>
               <ButtonLink href={app.url} size="lg" className="mt-5 w-full">
                 <Rocket className="size-4" aria-hidden /> Launch {app.name}
@@ -101,33 +111,35 @@ export function UpgradeView({
           ) : (
             <>
               {cancelled && <Alert tone="info">Checkout was cancelled. Nothing was charged.</Alert>}
-              <Alert tone={reason === "subscription_expired" ? "warning" : "info"} title={r.title}>
-                {r.body(app.name)}
-              </Alert>
+              {canAskFree ? (
+                <Card className="glow border-accent/40 p-6">
+                  <p className="flex items-center gap-2 font-semibold">
+                    <Gift className="size-4 text-accent-ink" aria-hidden /> Start with {trialLength(trialDays)} free
+                  </p>
+                  <p className="mt-2 text-sm leading-relaxed text-muted">
+                    {trialDays} days of full access to {app.name}. No card needed, nothing charged when it ends. We approve requests within one working day.
+                  </p>
+                  <ButtonLink href="/free-month" className="mt-4">
+                    Request your free month
+                  </ButtonLink>
+                </Card>
+              ) : trial && where !== "running" ? (
+                <TrialStatus trial={trial} compact />
+              ) : (
+                <Alert tone={reason === "subscription_expired" ? "warning" : "info"} title={r.title}>
+                  {r.body(app.name)}
+                </Alert>
+              )}
               {catalog ? (
                 <Card className="p-6">
                   <p className="mb-4 flex items-center gap-2 font-semibold">
-                    <Lock className="size-4 text-accent-ink" aria-hidden /> Choose your licence
+                    <Lock className="size-4 text-accent-ink" aria-hidden /> {canAskFree ? "Or choose a plan now" : "Choose your plan"}
                   </p>
                   <PlanOptions catalog={catalog} appId={app.appId} apps={apps} onChoose={setPlan} />
                 </Card>
               ) : (
                 <Alert tone="danger">Prices could not be loaded. Please refresh in a moment.</Alert>
               )}
-              <Card className="flex items-start gap-4 p-6">
-                <Building2 className="mt-0.5 size-5 shrink-0 text-accent-ink" aria-hidden />
-                <div className="text-sm">
-                  <p className="font-medium">{viewer.hasOrg ? "Your institution's licence does not include this application" : "Buying for a department or college?"}</p>
-                  <p className="mt-1 text-muted">
-                    {viewer.hasOrg
-                      ? "Ask your institution administrator to add it to the site licence, or buy a personal licence above."
-                      : "A site licence covers every member, with a proforma invoice for your purchase order."}{" "}
-                    <a href="/pricing#institutional" className="text-accent-ink underline">
-                      Site licences
-                    </a>
-                  </p>
-                </div>
-              </Card>
             </>
           )}
         </div>

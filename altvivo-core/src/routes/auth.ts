@@ -20,6 +20,7 @@ import {
 import { actorOf, clientOf, parse, requireUser } from '../plugins/security.js';
 import { toApiEntitlements } from '../services/access.js';
 import { MFA_REQUIRED_ROLES } from '../services/sessions.js';
+import { claimApprovedTrial } from '../services/trials.js';
 
 const email = z.string().trim().toLowerCase().email().max(254);
 const turnstileToken = z.string().min(1).max(2048);
@@ -173,6 +174,10 @@ export async function completeLogin(
   mfaVerified: boolean,
   method: string,
 ) {
+  // A free month approved before this account existed (or was verified) starts
+  // at the first sign-in after the address is proven, so the token carries it.
+  const owner = await d.prisma.user.findUnique({ where: { id: user.id }, select: { id: true, email: true, emailVerifiedAt: true, disabledAt: true } });
+  if (owner?.emailVerifiedAt && !owner.disabledAt) await claimApprovedTrial(d, owner, actorOf(req), req.log);
   const claims = await d.sessions.login(reply, user, {
     mfaVerified,
     client: clientOf(req),
@@ -444,6 +449,7 @@ export default async function authRoutes(app: FastifyInstance, d: Deps) {
       }
       await audit(tx, 'AUTH.EMAIL_VERIFIED', row.userId, {});
     });
+    await claimApprovedTrial(d, { id: row.userId, email: row.user.email }, actorOf(req), req.log);
     return reply.redirect(`${d.cfg.webOrigin}/workspace?verified=1`, 303);
   });
 

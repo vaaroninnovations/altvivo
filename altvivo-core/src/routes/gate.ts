@@ -103,7 +103,7 @@ export default async function gateRoutes(app: FastifyInstance, d: Deps) {
       .header('X-AltVivo-User-Id', claims.sub)
       .header('X-AltVivo-Email', headerSafe(claims.email))
       .header('X-AltVivo-Role', claims.role)
-      .header('X-AltVivo-Access', vip ? 'vip' : 'paid')
+      .header('X-AltVivo-Access', vip ? 'vip' : ent!.source === 'trial' ? 'trial' : 'paid')
       .header('X-AltVivo-Plan', headerSafe(ent!.plan ?? ent!.source ?? 'paid'));
     return reply.code(200).send();
   });

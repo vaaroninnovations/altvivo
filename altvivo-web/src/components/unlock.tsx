@@ -8,7 +8,7 @@ import { CheckoutDialog, type Viewer } from "./checkout";
 import { Dialog } from "./client";
 import { Pill, cx } from "./ui";
 
-/** Plans a person can buy for one app: its single-app plans and the bundles that include it. */
+/** Plans on sale for one app (XPRISM and aMaze are sold separately). */
 export function plansFor(catalog: CatalogResponse, appId: string): CatalogPlan[] {
   return catalog.plans
     .filter((p) => p.kind !== "SITE_LICENSE" && p.apps.includes(appId))
@@ -101,16 +101,10 @@ export function UnlockDialog({
     <>
       <Dialog open={open && !plan} onClose={onClose} title={`Unlock ${appName}`} wide>
         <p className="mb-5 text-sm text-muted">
-          Choose a licence. It activates as soon as payment completes{catalog.currency === "INR" ? ", with a GST invoice" : ""}.
+          Choose a plan. It activates as soon as payment completes{catalog.currency === "INR" ? ", with a GST invoice" : ""}. If you are on your free
+          month, the paid term is added to your account straight away.
         </p>
         <PlanOptions catalog={catalog} appId={appId} apps={apps} onChoose={setPlan} />
-        <p className="mt-5 text-xs text-subtle">
-          Part of a college or university? Ask your institution administrator about a site licence, or see{" "}
-          <a href="/pricing#institutional" className="underline">
-            institutional pricing
-          </a>
-          .
-        </p>
       </Dialog>
       {plan && (
         <CheckoutDialog

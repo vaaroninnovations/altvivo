@@ -18,6 +18,7 @@ import {
   startCheckout,
   syncStripeSubscription,
 } from '../services/checkout.js';
+import { startUsageCheckout } from '../services/usage.js';
 import { assertInvoicing, ensurePdf, toApiInvoice } from '../services/invoices.js';
 import { publicUser } from './auth.js';
 
@@ -49,6 +50,7 @@ export const ProfileFields = z
 
 const Scope = z.object({ scope: z.enum(['personal', 'organization']).default('personal') });
 const CheckoutBody = z.object({ planCode: z.string().regex(/^[a-z][a-z0-9_]{1,63}$/), seats: z.number().int().min(1).max(100000).optional() });
+const UsageCheckoutBody = z.object({ appId: z.string().regex(/^[a-z][a-z0-9]{1,31}$/), quantity: z.number().int().min(1).max(5000) });
 const ConfirmBody = z.object({
   orderId: z.string().regex(/^order_[A-Za-z0-9]{6,40}$/),
   paymentId: z.string().regex(/^pay_[A-Za-z0-9]{6,40}$/),
@@ -134,6 +136,22 @@ export default async function billingRoutes(app: FastifyInstance, d: Deps) {
     const profile = await d.prisma.billingProfile.findFirst({ where: owner.orgId ? { orgId: owner.orgId } : { userId: owner.userId! } });
     if (!profile) throw new HttpError(409, 'BILLING_PROFILE_REQUIRED', 'Add your billing details first (needed for the GST invoice)');
     return startCheckout(d, actorOf(req), { plan, seats, owner, profile, buyer: { id: claims.sub, email: claims.email, name: claims.name } });
+  });
+
+  /**
+   * Pay per use: buy analyses (one animal / video each) for an app that is sold
+   * per use. Paid like a plan; each paid analysis becomes one credit.
+   */
+  app.post('/v1/api/billing/usage/checkout', opts, async (req) => {
+    const body = parse(UsageCheckoutBody, req.body);
+    const claims = req.auth!;
+    if (!claims.email_verified) throw forbidden('EMAIL_NOT_VERIFIED', 'Verify your email address before purchasing');
+    assertInvoicing(d.cfg);
+    const target = await d.prisma.appRegistry.findUnique({ where: { appId: body.appId }, select: { appId: true, name: true, status: true, requiresCredits: true } });
+    if (!target || !target.requiresCredits || (target.status !== 'LIVE' && target.status !== 'BETA')) throw notFound('NOT_SOLD_PER_USE', 'This application is not sold per use');
+    const profile = await d.prisma.billingProfile.findFirst({ where: { userId: claims.sub } });
+    if (!profile) throw new HttpError(409, 'BILLING_PROFILE_REQUIRED', 'Add your billing details first (needed for the GST invoice)');
+    return startUsageCheckout(d, actorOf(req), { app: target, quantity: body.quantity, profile, buyer: { id: claims.sub, email: claims.email, name: claims.name } });
   });
 
   /** Browser callback of Razorpay Checkout: verify, capture if needed, activate, return fresh claims. */

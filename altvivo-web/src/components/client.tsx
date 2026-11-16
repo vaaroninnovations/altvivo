@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { Monitor, Moon, Sun, X } from "lucide-react";
+import { Moon, Sun, X } from "lucide-react";
 import { PUBLIC } from "@/lib/config";
 import { cx } from "./ui";
 
@@ -25,46 +25,36 @@ function applyTheme(pref: ThemePref) {
   document.documentElement.classList.toggle("dark", dark);
 }
 
+/** One button: switches between the light and dark theme (starts from the saved choice, else the device setting). */
 export function ThemeToggle() {
-  const [pref, setPref] = useState<ThemePref>("system");
+  const [dark, setDark] = useState<boolean | null>(null);
   useEffect(() => {
-    try {
-      setPref(((localStorage.getItem(THEME_KEY) ?? sessionStorage.getItem(THEME_KEY)) as ThemePref) || "system");
-    } catch {
-      /* storage blocked */
-    }
+    setDark(document.documentElement.classList.contains("dark"));
   }, []);
-  const choose = (p: ThemePref) => {
-    setPref(p);
+  const toggle = () => {
+    const next: ThemePref = dark ? "light" : "dark";
+    setDark(next === "dark");
     try {
-      themeStore()?.setItem(THEME_KEY, p);
+      themeStore()?.setItem(THEME_KEY, next);
     } catch {
       /* storage blocked */
     }
-    applyTheme(p);
+    applyTheme(next);
   };
-  const options: { value: ThemePref; label: string; Icon: typeof Sun }[] = [
-    { value: "light", label: "Light", Icon: Sun },
-    { value: "system", label: "System", Icon: Monitor },
-    { value: "dark", label: "Dark", Icon: Moon },
-  ];
+  const label = dark ? "Switch to light theme" : "Switch to dark theme";
+  const Icon = dark ? Sun : Moon;
   return (
-    <div role="radiogroup" aria-label="Colour theme" className="inline-flex rounded-full border border-line bg-surface p-0.5">
-      {options.map(({ value, label, Icon }) => (
-        <button
-          key={value}
-          type="button"
-          role="radio"
-          aria-checked={pref === value}
-          title={label}
-          onClick={() => choose(value)}
-          className={cx("grid size-7 place-items-center rounded-full transition", pref === value ? "bg-surface-3 text-fg" : "text-subtle hover:text-fg")}
-        >
-          <Icon className="size-3.5" aria-hidden />
-          <span className="sr-only">{label}</span>
-        </button>
-      ))}
-    </div>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={dark === true}
+      aria-label="Dark theme"
+      title={label}
+      onClick={toggle}
+      className="grid size-9 place-items-center rounded-full border border-line bg-surface text-muted transition hover:border-line-strong hover:text-fg"
+    >
+      <Icon className={cx("size-4 transition", dark === null && "opacity-0")} aria-hidden />
+    </button>
   );
 }
 

@@ -1,0 +1,313 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Promo recorder</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,500;1,500&display=swap">
+<style>
+  html,body{margin:0;background:#09081a;color:#f5f3ff;font:14px "IBM Plex Sans",sans-serif}
+  canvas{display:block;width:100%;max-width:1280px;margin:0 auto}
+  #status{padding:8px 12px;font-family:"IBM Plex Mono",monospace}
+</style>
+</head>
+<body>
+<canvas id="c" width="1280" height="720"></canvas>
+<div id="status">ready</div>
+<script>
+const W = 1280, H = 720, DUR = 13;
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const C = {
+  bg: "#09081a", surface: "#100e26", surface2: "#161338", line: "#221e46", lineStrong: "#34306a",
+  fg: "#f5f3ff", muted: "#b6b1d6", subtle: "#8b86b0", accent: "#7c5cff", accentInk: "#c1b0ff",
+  from: "#3b45ff", to: "#a93cff", live: "#34d399",
+};
+const SANS = '"IBM Plex Sans", sans-serif', SERIF = '"IBM Plex Serif", serif', MONO = '"IBM Plex Mono", monospace';
+
+// ---------- helpers
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const ease = (x) => { x = clamp(x); return 1 - Math.pow(1 - x, 3); };
+const easeIO = (x) => { x = clamp(x); return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+/** Visibility of a scene spanning [a,b] with crossfades of f seconds. */
+const vis = (t, a, b, f = 0.45) => clamp(Math.min((t - a) / f, (b - t) / f));
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+function text(s, x, y, { font = SANS, size = 20, weight = 400, color = C.fg, align = "left", italic = false, alpha = 1, ls = 0 } = {}) {
+  ctx.save(); ctx.globalAlpha *= alpha; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = "alphabetic";
+  ctx.font = `${italic ? "italic " : ""}${weight} ${size}px ${font}`; if (ls) ctx.letterSpacing = ls + "px";
+  ctx.fillText(s, x, y); ctx.restore();
+}
+function brandGrad(x0, y0, x1, y1) { const g = ctx.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, C.from); g.addColorStop(1, C.to); return g; }
+function panel(x, y, w, h, title, right) {
+  ctx.save();
+  ctx.shadowColor = "rgba(124,92,255,0.35)"; ctx.shadowBlur = 60;
+  rr(x, y, w, h, 18); ctx.fillStyle = "rgba(16,14,38,0.92)"; ctx.fill(); ctx.restore();
+  rr(x, y, w, h, 18); ctx.strokeStyle = C.line; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x, y + 46); ctx.lineTo(x + w, y + 46); ctx.strokeStyle = C.line; ctx.stroke();
+  ["#f87171cc", "#fbbf24cc", "#34d399cc"].forEach((c, i) => { ctx.beginPath(); ctx.arc(x + 24 + i * 18, y + 23, 5.5, 0, 7); ctx.fillStyle = c; ctx.fill(); });
+  text(title, x + 88, y + 29, { font: MONO, size: 14, color: C.subtle });
+  if (right) text(right, x + w - 20, y + 29, { font: MONO, size: 14, color: C.accentInk, align: "right" });
+}
+function chip(s, x, y, a) {
+  ctx.save(); ctx.globalAlpha *= a; ctx.font = `500 22px ${SANS}`;
+  const w = ctx.measureText(s).width + 56;
+  rr(x, y, w, 50, 25); ctx.fillStyle = "rgba(22,19,56,0.9)"; ctx.fill(); ctx.strokeStyle = C.lineStrong; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.beginPath(); ctx.arc(x + 25, y + 25, 5, 0, 7); ctx.fillStyle = brandGrad(x + 20, y, x + 30, y + 50); ctx.fill();
+  ctx.fillStyle = C.fg; ctx.textBaseline = "middle"; ctx.fillText(s, x + 40, y + 26); ctx.restore();
+  return w;
+}
+
+// ---------- background
+function background(t) {
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+  const blob = (cx, cy, r, col) => { const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r); g.addColorStop(0, col); g.addColorStop(1, "rgba(9,8,26,0)"); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); };
+  blob(160 + 60 * Math.sin(t * 0.35), 60 + 40 * Math.cos(t * 0.3), 620, "rgba(59,69,255,0.30)");
+  blob(1120 + 50 * Math.cos(t * 0.28), 640 + 40 * Math.sin(t * 0.33), 640, "rgba(169,60,255,0.28)");
+  ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.035)"; ctx.lineWidth = 1;
+  for (let x = 0; x <= W; x += 64) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = 0; y <= H; y += 64) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  ctx.restore();
+}
+
+// ---------- shared scenes
+function introScene(t, logo, lw, lh, label) {
+  const a = vis(t, -1, 2.7), p = ease(prog(t, 0.1, 1.0));
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a;
+  const s = 0.92 + 0.08 * p, pw = 520 * s, ph = pw * (lh / lw) + 56;
+  const x = W / 2 - pw / 2, y = 250 - ph / 2 + (1 - p) * 20;
+  ctx.globalAlpha = a * p;
+  ctx.save(); ctx.shadowColor = "rgba(124,92,255,0.55)"; ctx.shadowBlur = 80; rr(x, y, pw, ph, 26); ctx.fillStyle = "#fff"; ctx.fill(); ctx.restore();
+  ctx.drawImage(logo, x + 28, y + 28, pw - 56, ph - 56);
+  ctx.globalAlpha = a * ease(prog(t, 0.7, 1.5));
+  text(label, W / 2, 500, { font: SERIF, size: 34, italic: true, align: "center", color: C.fg });
+  ctx.fillStyle = brandGrad(W / 2 - 60, 0, W / 2 + 60, 0); ctx.fillRect(W / 2 - 60, 530, 120 * ease(prog(t, 1.0, 1.8)), 3);
+  ctx.restore();
+}
+function outroScene(t, a0, heading, items) {
+  const a = vis(t, a0, DUR + 1);
+  if (a <= 0) return;
+  ctx.save(); ctx.globalAlpha = a;
+  text(heading, 100, 150, { font: SERIF, size: 46, weight: 500, alpha: ease(prog(t, a0, a0 + 0.6)) });
+  let x = 100, y = 205;
+  items.forEach((s, i) => {
+    ctx.font = `500 22px ${SANS}`; const w = ctx.measureText(s).width + 56;
+    if (x + w > W - 100) { x = 100; y += 66; }
+    const ai = ease(prog(t, a0 + 0.25 + i * 0.18, a0 + 0.65 + i * 0.18));
+    ctx.save(); ctx.translate(0, (1 - ai) * 14); chip(s, x, y, ai); ctx.restore();
+    x += w + 16;
+  });
+  const af = ease(prog(t, a0 + 1.4, a0 + 2.1));
+  ctx.globalAlpha = a * af;
+  text("Available on", 100, 600, { font: MONO, size: 16, color: C.subtle, ls: 2 });
+  ctx.drawImage(IMG.wordmark, 96, 614, 224, 224 * 392 / 1200);
+  text("One identity. Infinite scientific capabilities.", W - 100, 668, { font: SERIF, size: 24, italic: true, align: "right", color: C.muted });
+  ctx.restore();
+}
+
+// ---------- XPRISM
+function sigmoid(l) { return 1 / (1 + Math.pow(10, (Math.log10(3.2) - l) * 1.4)); }
+function xprism(t) {
+  introScene(t, IMG.xprism, 900, 407, "Virtual pharmacology · Computer-Assisted Learning");
+
+  // Scene 2: organ bath kymograph
+  let a = vis(t, 2.5, 7.1);
+  if (a > 0) {
+    ctx.save(); ctx.globalAlpha = a;
+    const x = 100, y = 110, w = 1080, h = 470;
+    panel(x, y, w, h, "xprism · isolated organ bath · rat ileum", "recording");
+    text("Isolated tissue & organ bath", x + 36, y + 100, { font: SERIF, size: 30, weight: 500 });
+    text("Graded contractions to increasing agonist doses, recorded on a virtual kymograph.", x + 36, y + 132, { size: 18, color: C.muted });
+    // bath chamber
+    const bx = x + 50, by = y + 170, bw = 150, bh = 260;
+    rr(bx, by, bw, bh, 14); ctx.fillStyle = "rgba(59,69,255,0.10)"; ctx.fill(); ctx.strokeStyle = C.lineStrong; ctx.stroke();
+    const fill = ctx.createLinearGradient(0, by + 40, 0, by + bh); fill.addColorStop(0, "rgba(124,92,255,0.18)"); fill.addColorStop(1, "rgba(124,92,255,0.40)");
+    rr(bx + 6, by + 40, bw - 12, bh - 46, 10); ctx.fillStyle = fill; ctx.fill();
+    // bubbles
+    for (let i = 0; i < 9; i++) { const ph = (t * 0.7 + i * 0.37) % 1; ctx.beginPath(); ctx.arc(bx + 30 + (i * 37) % 90, by + bh - 12 - ph * (bh - 60), 2 + (i % 3), 0, 7); ctx.fillStyle = `rgba(193,176,255,${0.5 * (1 - ph)})`; ctx.fill(); }
+    const kp = prog(t, 3.0, 6.9);
+    const doses = [0.12, 0.34, 0.56, 0.78], amps = [0.18, 0.42, 0.7, 0.92];
+    const resp = (u) => { let r = 0; doses.forEach((d, i) => { const dt = u - d; if (dt > 0) r = Math.max(r, amps[i] * (1 - Math.exp(-dt * 60)) * Math.exp(-Math.max(0, dt - 0.08) * 40)); }); return r; };
+    // tissue strip contracts with current response
+    const cur = resp(kp), tl = 150 - cur * 40;
+    ctx.strokeStyle = C.muted; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx + bw / 2, by - 20); ctx.lineTo(bx + bw / 2, by + 60); ctx.stroke();
+    rr(bx + bw / 2 - 9 - cur * 4, by + 60, 18 + cur * 8, tl, 9); ctx.fillStyle = "#e7a3c4"; ctx.fill();
+    // kymograph
+    const kx = x + 260, ky = y + 170, kw = 770, kh = 260;
+    rr(kx, ky, kw, kh, 12); ctx.fillStyle = "rgba(9,8,26,0.6)"; ctx.fill(); ctx.strokeStyle = C.line; ctx.stroke();
+    ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.05)";
+    for (let i = 1; i < 10; i++) { ctx.beginPath(); ctx.moveTo(kx + i * kw / 10, ky); ctx.lineTo(kx + i * kw / 10, ky + kh); ctx.stroke(); }
+    ctx.restore();
+    const base = ky + kh - 40;
+    ctx.beginPath();
+    for (let i = 0; i <= 400 * kp; i++) { const u = i / 400; const px = kx + 20 + u * (kw - 40), py = base - resp(u) * (kh - 80) + Math.sin(u * 220) * 1.2; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+    ctx.strokeStyle = brandGrad(kx, 0, kx + kw, 0); ctx.lineWidth = 3; ctx.stroke();
+    doses.forEach((d, i) => {
+      if (kp < d) return; const px = kx + 20 + d * (kw - 40);
+      ctx.fillStyle = C.accentInk; ctx.beginPath(); ctx.moveTo(px, base + 14); ctx.lineTo(px - 6, base + 24); ctx.lineTo(px + 6, base + 24); ctx.fill();
+      text(`dose ${i + 1}`, px, base + 34, { font: MONO, size: 13, color: C.subtle, align: "center" });
+    });
+    ctx.restore();
+  }
+
+  // Scene 3: dose-response
+  a = vis(t, 6.9, 10.6);
+  if (a > 0) {
+    ctx.save(); ctx.globalAlpha = a;
+    const x = 100, y = 110, w = 1080, h = 470;
+    panel(x, y, w, h, "xprism · analysis · dose–response", "EC50 = 3.2 µM");
+    text("From raw traces to a fitted curve", x + 36, y + 100, { font: SERIF, size: 30, weight: 500 });
+    text("Log dose–response, EC50 and Hill slope, ready for the practical record.", x + 36, y + 132, { size: 18, color: C.muted });
+    const px = x + 70, py = y + 170, pw = 620, ph = 250;
+    const toX = (l) => px + ((l + 1) / 3) * pw, toY = (r) => py + ph - r * ph;
+    ctx.strokeStyle = C.lineStrong; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, py + ph); ctx.lineTo(px + pw, py + ph); ctx.stroke();
+    ["0.1", "1", "10", "100"].forEach((s, i) => text(s, px + i * pw / 3, py + ph + 24, { font: MONO, size: 13, color: C.subtle, align: "center" }));
+    text("log [agonist] µM", px + pw, py + ph - 10, { font: MONO, size: 12, color: C.subtle, align: "right" });
+    ctx.setLineDash([4, 6]); ctx.strokeStyle = "rgba(124,92,255,0.45)"; ctx.beginPath(); ctx.moveTo(px, toY(0.5)); ctx.lineTo(px + pw, toY(0.5)); ctx.stroke(); ctx.setLineDash([]);
+    const cp = easeIO(prog(t, 7.4, 9.4));
+    ctx.beginPath(); for (let i = 0; i <= 120 * cp; i++) { const l = -1 + 3 * i / 120; const X = toX(l), Y = toY(sigmoid(l)); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }
+    ctx.strokeStyle = brandGrad(px, 0, px + pw, 0); ctx.lineWidth = 3.5; ctx.stroke();
+    [-0.8, -0.3, 0.2, 0.5, 0.8, 1.2, 1.6].forEach((l, i) => {
+      const ap = ease(prog(t, 7.3 + i * 0.15, 7.6 + i * 0.15)); if (ap <= 0) return;
+      const j = [0.02, -0.03, 0.04, -0.02, 0.03, -0.01, 0.01][i];
+      ctx.globalAlpha = a * ap; ctx.beginPath(); ctx.arc(toX(l), toY(clamp(sigmoid(l) + j)), 6, 0, 7); ctx.fillStyle = C.surface; ctx.fill(); ctx.strokeStyle = C.fg; ctx.lineWidth = 2; ctx.stroke();
+    });
+    ctx.globalAlpha = a;
+    [["Emax", "98.4%"], ["EC50", "3.2 µM"], ["Hill", "1.40"]].forEach(([k, v], i) => {
+      const ap = ease(prog(t, 8.6 + i * 0.25, 9.1 + i * 0.25)); const bx = x + 760, by = y + 175 + i * 92;
+      ctx.globalAlpha = a * ap; rr(bx, by, 270, 76, 12); ctx.fillStyle = C.surface2; ctx.fill(); ctx.strokeStyle = C.line; ctx.stroke();
+      text(k.toUpperCase(), bx + 20, by + 28, { font: MONO, size: 13, color: C.subtle, ls: 1.5 });
+      text(v, bx + 20, by + 60, { font: MONO, size: 26, weight: 500 });
+    });
+    ctx.globalAlpha = a; text("illustrative output", x + w - 20, y + h - 16, { font: MONO, size: 12, color: C.subtle, align: "right" });
+    ctx.restore();
+  }
+
+  outroScene(t, 10.4, "40+ virtual experiments, one lab.", [
+    "Organ bath · pA2 / Schild plot", "Rabbit eye", "Hot plate & tail-flick", "MES & PTZ seizure models",
+    "Plus maze · Y-maze · Morris water maze", "Assignments & marks sheets",
+  ]);
+}
+
+// ---------- aMaze
+const PATH = [], PSTEP = 1 / 60;
+const posAt = (u) => ({
+  x: 0.5 + 0.40 * Math.sin(1.25 * u + 0.8 * Math.sin(0.47 * u)),
+  y: 0.5 + 0.40 * Math.sin(0.83 * u + 1.2 + 0.7 * Math.cos(0.31 * u)),
+});
+for (let s = 0; s <= 8; s += PSTEP) PATH.push(posAt(s * 1.6));
+const pathIdx = (s) => Math.min(PATH.length - 1, Math.max(0, Math.floor(s / PSTEP)));
+function mouse(x, y, ang, scale = 1) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.scale(scale, scale);
+  ctx.beginPath(); ctx.moveTo(-14, 0); ctx.quadraticCurveTo(-34, 6, -40, -4); ctx.strokeStyle = "#d9d3c8"; ctx.lineWidth = 2; ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(0, 0, 17, 10, 0, 0, 7); ctx.fillStyle = "#f4f1ea"; ctx.fill();
+  ctx.beginPath(); ctx.ellipse(16, 0, 8, 6.5, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = "#e7a3c4"; [-5, 5].forEach((d) => { ctx.beginPath(); ctx.arc(14, d, 3.2, 0, 7); ctx.fill(); });
+  ctx.restore();
+}
+const heat = document.createElement("canvas"); heat.width = heat.height = 64; const hctx = heat.getContext("2d");
+function amaze(t) {
+  introScene(t, IMG.amaze, 900, 345, "Neurobehavioural video tracking & assay analytics");
+
+  const a = vis(t, 2.5, 10.6);
+  if (a > 0) {
+    ctx.save(); ctx.globalAlpha = a;
+    const x = 100, y = 110, w = 1080, h = 470;
+    const heatPhase = prog(t, 6.6, 7.2);
+    panel(x, y, w, h, heatPhase < 0.5 ? "amaze · open field · trial 03" : "amaze · open field · occupancy", heatPhase < 0.5 ? "tracking" : "heatmap");
+    const ax = x + 40, ay = y + 70, as = 380;
+    // arena
+    rr(ax, ay, as, as, 10); ctx.fillStyle = "#2a2840"; ctx.fill(); ctx.strokeStyle = "#5c587d"; ctx.lineWidth = 3; ctx.stroke();
+    const ARX = (u) => ax + 20 + u * (as - 40), ARY = (u) => ay + 20 + u * (as - 40);
+    // ROI: centre zone, auto-detected
+    const roi = ease(prog(t, 3.0, 3.6));
+    ctx.save(); ctx.globalAlpha = a * roi; ctx.setLineDash([8, 6]); ctx.strokeStyle = C.accentInk; ctx.lineWidth = 2;
+    ctx.strokeRect(ARX(0.3), ARY(0.3), ARX(0.7) - ARX(0.3), ARY(0.7) - ARY(0.3)); ctx.setLineDash([]);
+    text("centre zone", ARX(0.3) + 6, ARY(0.3) - 8, { font: MONO, size: 12, color: C.accentInk });
+    ctx.strokeStyle = "rgba(193,176,255,0.6)"; ctx.strokeRect(ax - 6, ay - 6, as + 12, as + 12);
+    text("arena detected", ax - 6, ay - 12, { font: MONO, size: 12, color: C.accentInk });
+    ctx.restore();
+    const s = Math.max(0, t - 3.0), idx = pathIdx(s);
+    // occupancy heatmap
+    if (heatPhase > 0) {
+      hctx.clearRect(0, 0, 64, 64);
+      const n = idx; let max = 0; const grid = new Float32Array(64 * 64);
+      for (let i = 0; i <= n; i++) { const p = PATH[i]; const gx = Math.floor(p.x * 63.99), gy = Math.floor(p.y * 63.99);
+        for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) { const X = gx + dx, Y = gy + dy; if (X < 0 || Y < 0 || X > 63 || Y > 63) continue; const v = Math.exp(-(dx * dx + dy * dy) / 8); grid[Y * 64 + X] += v; } }
+      for (const v of grid) max = Math.max(max, v);
+      const img = hctx.createImageData(64, 64);
+      const stops = [[9, 8, 26, 0], [59, 69, 255, 150], [169, 60, 255, 200], [251, 146, 60, 230], [254, 240, 138, 255]];
+      for (let i = 0; i < grid.length; i++) { const v = Math.pow(grid[i] / max, 0.6) * (stops.length - 1); const k = Math.min(stops.length - 2, Math.floor(v)), f = v - k;
+        for (let c = 0; c < 4; c++) img.data[i * 4 + c] = stops[k][c] + (stops[k + 1][c] - stops[k][c]) * f; }
+      hctx.putImageData(img, 0, 0);
+      ctx.save(); ctx.globalAlpha = a * heatPhase; ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(heat, ARX(0), ARY(0), ARX(1) - ARX(0), ARY(1) - ARY(0)); ctx.restore();
+    }
+    // trajectory
+    if (t > 3.0) {
+      ctx.save(); ctx.globalAlpha = a * (1 - 0.7 * heatPhase);
+      ctx.beginPath(); for (let i = 0; i <= idx; i++) { const p = PATH[i]; i ? ctx.lineTo(ARX(p.x), ARY(p.y)) : ctx.moveTo(ARX(p.x), ARY(p.y)); }
+      ctx.strokeStyle = brandGrad(ax, ay, ax + as, ay + as); ctx.lineWidth = 2.2; ctx.stroke(); ctx.restore();
+    }
+    const p = PATH[idx], q = PATH[Math.max(0, idx - 3)];
+    const mx = ARX(p.x), my = ARY(p.y), ang = Math.atan2(p.y - q.y, p.x - q.x);
+    mouse(mx, my, ang, 0.95);
+    if (t > 3.0) { ctx.strokeStyle = C.live; ctx.lineWidth = 2; ctx.strokeRect(mx - 30, my - 30, 60, 60);
+      ctx.beginPath(); ctx.arc(mx, my, 4, 0, 7); ctx.fillStyle = C.live; ctx.fill(); }
+    // live metrics, computed from the trajectory shown (arena = 50 cm)
+    let dist = 0, centre = 0, entries = 0, inside = false;
+    for (let i = 1; i <= idx; i++) { dist += Math.hypot(PATH[i].x - PATH[i - 1].x, PATH[i].y - PATH[i - 1].y) * 50;
+      const c = PATH[i].x > 0.3 && PATH[i].x < 0.7 && PATH[i].y > 0.3 && PATH[i].y < 0.7; if (c) centre += PSTEP; if (c && !inside) entries++; inside = c; }
+    const speed = idx > 0 ? Math.hypot(p.x - q.x, p.y - q.y) * 50 / (3 * PSTEP) : 0;
+    const mxp = x + 470;
+    text(heatPhase < 0.5 ? "Markerless tracking, scored as it runs" : "Occupancy heatmaps per trial", mxp, y + 104, { font: SERIF, size: 30, weight: 500 });
+    text(heatPhase < 0.5 ? "Automatic arena and ROI detection, then trajectories and zone time." : "See where each animal spent its time, then export for statistics.", mxp, y + 136, { size: 18, color: C.muted });
+    [["distance", `${dist.toFixed(1)} cm`], ["centre time", `${centre.toFixed(1)} s`], ["centre entries", `${entries}`], ["speed", `${speed.toFixed(1)} cm/s`]].forEach(([k, v], i) => {
+      const bx = mxp + (i % 2) * 290, by = y + 180 + Math.floor(i / 2) * 110;
+      rr(bx, by, 270, 92, 12); ctx.fillStyle = C.surface2; ctx.fill(); ctx.strokeStyle = C.line; ctx.stroke();
+      text(k.toUpperCase(), bx + 20, by + 32, { font: MONO, size: 13, color: C.subtle, ls: 1.5 });
+      text(v, bx + 20, by + 70, { font: MONO, size: 28, weight: 500 });
+    });
+    text("illustrative output", x + w - 20, y + h - 16, { font: MONO, size: 12, color: C.subtle, align: "right" });
+    ctx.restore();
+  }
+
+  outroScene(t, 10.4, "Reproducible scoring for every recorded trial.", [
+    "Elevated plus maze", "Morris water maze", "Open field", "Y-maze",
+    "Automatic arena & ROI detection", "Trajectories, zone time & speed", "Heatmaps & per-trial reports", "CSV / JSON export",
+  ]);
+}
+
+// ---------- driver
+const APP = new URLSearchParams(location.search).get("app") || "xprism";
+const IMG = {};
+const load = (k, src) => new Promise((r) => { const i = new Image(); i.onload = () => { IMG[k] = i; r(); }; i.src = src; });
+function frame(t) { background(t); (APP === "amaze" ? amaze : xprism)(t);
+  // gentle fade from/to background so the loop joins cleanly
+  const f = Math.min(clamp(t / 0.4), clamp((DUR - t) / 0.5)); if (f < 1) { ctx.fillStyle = `rgba(9,8,26,${1 - f})`; ctx.fillRect(0, 0, W, H); } }
+const status = (s) => (document.getElementById("status").textContent = s);
+const ready = Promise.all([load("xprism", "/brand/xprism-logo.png"), load("amaze", "/brand/amaze-logo.png"), load("wordmark", "/brand/altvivo-wordmark-dark.png"),
+  ...["400 20px IBM Plex Sans", "500 20px IBM Plex Sans", "italic 500 20px IBM Plex Serif", "500 20px IBM Plex Serif", "400 20px IBM Plex Mono", "500 20px IBM Plex Mono"].map((f) => document.fonts.load(f))]);
+ready.then(() => { frame(6); status("ready: " + APP); });
+
+window.showAt = (t) => ready.then(() => frame(t));
+async function upload(name, blob) { const r = await fetch(`/save?name=${name}`, { method: "POST", body: blob }); return r.text(); }
+window.record = async () => {
+  await ready;
+  const types = ["video/mp4;codecs=avc1.640028", "video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm"];
+  const mime = types.find((m) => MediaRecorder.isTypeSupported(m));
+  const ext = mime.startsWith("video/mp4") ? "mp4" : "webm";
+  const stream = cv.captureStream(30), rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6_000_000 });
+  const chunks = []; rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  const done = new Promise((r) => (rec.onstop = r));
+  frame(0); rec.start(250);
+  const t0 = performance.now();
+  await new Promise((resolve) => { const tick = () => { const t = (performance.now() - t0) / 1000; frame(Math.min(t, DUR)); status(`recording ${APP} ${t.toFixed(1)}s`); t < DUR + 0.15 ? requestAnimationFrame(tick) : resolve(); }; requestAnimationFrame(tick); });
+  rec.stop(); await done;
+  const out = [await upload(`${APP}-promo.${ext}`, new Blob(chunks, { type: mime.split(";")[0] }))];
+  frame(APP === "amaze" ? 9.4 : 9.6);
+  out.push(await upload(`${APP}-promo.jpg`, await new Promise((r) => cv.toBlob(r, "image/jpeg", 0.88))));
+  status(out.join(" | ")); return { mime, out };
+};
+</script>
+</body>
+</html>

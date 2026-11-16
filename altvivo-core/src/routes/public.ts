@@ -5,11 +5,13 @@ import type { Deps } from '../deps.js';
 import { audit, withAudit } from '../lib/audit.js';
 import { ACCESS_COOKIE } from '../lib/cookies.js';
 import { hmacHex } from '../lib/crypto.js';
-import { badRequest, tooMany } from '../lib/errors.js';
+import { badRequest, pgCode, tooMany } from '../lib/errors.js';
 import { templates } from '../lib/mailer.js';
 import { userAgent } from '../lib/net.js';
 import { actorOf, parse } from '../plugins/security.js';
+import { deliverToInbox } from '../services/mailbox.js';
 import { listApps } from '../services/registry.js';
+import { toApiTrial, trialAppIds } from '../services/trials.js';
 
 const WaitlistBody = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
@@ -44,6 +46,18 @@ const ContactBody = z.object({
   subject: z.string().trim().min(3).max(200),
   message: z.string().trim().min(10).max(5000),
   app: z.string().regex(/^[a-z][a-z0-9]{1,31}$/).optional().nullable(),
+  /** Bots fill every field; humans never see this one. */
+  website: z.string().max(500).optional(),
+});
+
+const TrialBody = z.object({
+  name: z.string().trim().min(2).max(200),
+  email: z.string().trim().toLowerCase().email().max(254),
+  institution: z.string().trim().min(2).max(300),
+  designation: z.string().trim().max(120).optional().nullable(),
+  /** Applications wanted; omitted = every application that is live. */
+  apps: z.array(z.string().regex(/^[a-z][a-z0-9]{1,31}$/)).max(12).optional(),
+  useCase: z.string().trim().min(10).max(2000),
   /** Bots fill every field; humans never see this one. */
   website: z.string().max(500).optional(),
 });
@@ -94,9 +108,9 @@ export default async function publicRoutes(app: FastifyInstance, d: Deps) {
     return { apps: await listApps(d.prisma, d.redis) };
   });
 
-  /** Price list for /pricing. Amounts exclude GST; Indian customers pay INR via Razorpay, others USD via Stripe. */
+  /** Price list for /pricing, in Indian rupees (Razorpay). Amounts exclude GST. USD via Stripe only when USD_BILLING_ENABLED. */
   app.get<{ Querystring: { currency?: string } }>('/v1/public/plans', async (req, reply) => {
-    const currency = detectCurrency(req, req.query.currency);
+    const currency = d.cfg.USD_BILLING_ENABLED ? detectCurrency(req, req.query.currency) : 'INR';
     const provider = currency === 'INR' ? 'RAZORPAY' : 'STRIPE';
     const plans = await d.prisma.plan.findMany({
       where: { active: true, isPublic: true },
@@ -109,6 +123,10 @@ export default async function publicRoutes(app: FastifyInstance, d: Deps) {
       provider,
       taxNote: currency === 'INR' ? 'Prices exclude 18% GST, added at checkout.' : 'Prices exclude taxes; exports of services are zero-rated.',
       invoicing: d.cfg.invoicingEnabled,
+      /** Apps sold per use: the price of one analysis (one animal / video), before GST. */
+      payPerUse: (await listApps(d.prisma, d.redis))
+        .filter((a) => a.requiresCredits && (a.status === 'LIVE' || a.status === 'BETA'))
+        .map((a) => ({ appId: a.appId, name: a.name, amountMinor: d.cfg.PAY_PER_USE_PRICE_PAISE, gstRateBp: 1800, purchasable: d.cfg.invoicingEnabled && d.billing.RAZORPAY.enabled })),
       plans: plans.map((p) => ({
         planCode: p.planCode,
         name: p.name,
@@ -186,6 +204,8 @@ export default async function publicRoutes(app: FastifyInstance, d: Deps) {
           message: body.message, appId, userId, ipAddress: req.clientIp, userAgent: userAgent(req),
         },
       });
+      // Every enquiry is also filed in the SuperAdmin mailbox, where it can be answered.
+      await deliverToInbox(tx, { fromName: body.name, fromEmail: body.email, subject: body.subject, body: body.message, source: 'contact', contactMessageId: m.id, toEmails: [d.cfg.SUPPORT_EMAIL.toLowerCase()] });
       await audit(tx, 'CONTACT.RECEIVED', m.id, { category: body.category, app_id: appId });
       return m;
     });
@@ -194,6 +214,66 @@ export default async function publicRoutes(app: FastifyInstance, d: Deps) {
       .catch((err) => req.log.warn({ err }, 'contact notification failed'));
     await d.mailer.send({ to: body.email, ...templates.contactAcknowledgement(body.name, body.subject) }).catch(() => undefined);
     return reply.code(201).send({ status: 'received', reference: msg.id });
+  });
+
+  /** What the "one month free" banner and form advertise. */
+  app.get('/v1/public/trial-offer', async (_req, reply) => {
+    const apps = await listApps(d.prisma, d.redis);
+    reply.header('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    return { days: d.cfg.TRIAL_DAYS, apps: apps.filter((a) => a.status === 'LIVE' || a.status === 'BETA').map((a) => ({ appId: a.appId, name: a.name })) };
+  });
+
+  /**
+   * "One month free" request form. Stored for a SUPERADMIN to approve
+   * (/admin/trials) and filed in the admin mailbox. One request per address;
+   * a repeat from an anonymous visitor gets the same answer as a first one,
+   * so the form cannot be used to learn who has asked before.
+   */
+  app.post('/v1/public/trial-request', { config: { rateLimit: 'auth' } }, async (req, reply) => {
+    const body = parse(TrialBody, req.body);
+    if (body.website) return reply.code(201).send({ status: 'received' });
+    const userId = await optionalUserId(req);
+    const account = userId ? await d.prisma.user.findUnique({ where: { id: userId }, select: { email: true } }) : null;
+    // A signed-in person asks for their own account, whatever they typed.
+    const emailAddr = account?.email.toLowerCase() ?? body.email;
+    const daily = await d.limiter.hit('trial-email', emailAddr, 3, 86_400).catch(() => ({ allowed: true, retryAfterSeconds: 0 }));
+    if (!daily.allowed) throw tooMany(daily.retryAfterSeconds);
+    const available = await trialAppIds(d);
+    const appIds = body.apps?.length ? available.filter((a) => body.apps!.includes(a)) : available;
+    if (!appIds.length) throw badRequest('NO_APPLICATION', 'Choose at least one available application');
+
+    const duplicate = async () => {
+      const existing = await d.prisma.trialRequest.findFirst({ where: { email: emailAddr, status: { not: 'DECLINED' } } });
+      return reply.code(account ? 200 : 201).send(account && existing ? { status: 'already_requested', trial: toApiTrial(existing) } : { status: 'received' });
+    };
+    if (await d.prisma.trialRequest.findFirst({ where: { email: emailAddr, status: { not: 'DECLINED' } }, select: { id: true } })) return duplicate();
+
+    let request;
+    try {
+      request = await withAudit(d.prisma, actorOf(req), async (tx) => {
+        const r = await tx.trialRequest.create({
+          data: {
+            name: body.name, email: emailAddr, institution: body.institution, designation: body.designation || null, appIds, useCase: body.useCase,
+            userId, days: d.cfg.TRIAL_DAYS, ipAddress: req.clientIp, userAgent: userAgent(req),
+          },
+        });
+        await deliverToInbox(tx, {
+          fromName: body.name, fromEmail: emailAddr, source: 'trial', trialRequestId: r.id, toEmails: [d.cfg.SUPPORT_EMAIL.toLowerCase()],
+          subject: `One month free: ${body.name}, ${body.institution}`,
+          body: `${body.designation ? `${body.designation}, ` : ''}${body.institution}\nApplications: ${appIds.join(', ')}\n\n${body.useCase}`,
+        });
+        await audit(tx, 'TRIAL.REQUESTED', r.id, { apps: appIds, signed_in: !!userId });
+        return r;
+      });
+    } catch (err) {
+      if (pgCode(err) === '23505') return duplicate();
+      throw err;
+    }
+    await d.mailer
+      .send({ to: d.cfg.SUPPORT_EMAIL, replyTo: emailAddr, ...templates.trialRequestNotification({ name: body.name, email: emailAddr, institution: body.institution, designation: body.designation || null, apps: appIds, useCase: body.useCase, id: request.id }, `${d.cfg.webOrigin}/admin/trials`) })
+      .catch((err) => req.log.warn({ err }, 'trial request notification failed'));
+    await d.mailer.send({ to: emailAddr, ...templates.trialRequestReceived(body.name, d.cfg.TRIAL_DAYS) }).catch(() => undefined);
+    return reply.code(201).send(account ? { status: 'received', trial: toApiTrial(request) } : { status: 'received' });
   });
 
   /**

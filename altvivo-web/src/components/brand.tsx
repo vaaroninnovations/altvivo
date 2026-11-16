@@ -26,9 +26,9 @@ export function LogoMark({ className }: { className?: string }) {
   return (
     <span className={cx("inline-flex shrink-0", className ?? "h-7")}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/brand/altvivo-mark.png" width={512} height={332} alt="" aria-hidden className="h-full w-auto dark:hidden" />
+      <img src="/brand/altvivo-mark.png" width={512} height={264} alt="" aria-hidden className="h-full w-auto dark:hidden" />
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/brand/altvivo-mark-dark.png" width={512} height={332} alt="" aria-hidden className="hidden h-full w-auto dark:block" />
+      <img src="/brand/altvivo-mark-dark.png" width={512} height={264} alt="" aria-hidden className="hidden h-full w-auto dark:block" />
     </span>
   );
 }
@@ -39,9 +39,9 @@ export function Logo({ className }: { className?: string }) {
     <span className={cx("inline-flex shrink-0 items-center", className)}>
       <span className="sr-only">AltVivo</span>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/brand/altvivo-wordmark.png" width={1200} height={392} alt="" aria-hidden className="h-8 w-auto dark:hidden" />
+      <img src="/brand/altvivo-wordmark.png" width={1200} height={232} alt="" aria-hidden className="h-8 w-auto dark:hidden" />
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/brand/altvivo-wordmark-dark.png" width={1200} height={392} alt="" aria-hidden className="hidden h-8 w-auto dark:block" />
+      <img src="/brand/altvivo-wordmark-dark.png" width={1200} height={232} alt="" aria-hidden className="hidden h-8 w-auto dark:block" />
     </span>
   );
 }

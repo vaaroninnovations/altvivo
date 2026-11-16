@@ -107,7 +107,7 @@ const CATEGORIES: { key: keyof Choice; title: string; body: string }[] = [
   {
     key: "analytics",
     title: "Analytics",
-    body: "Aggregate usage statistics. The AltVivo portal does not run analytics today; XPRISM asks separately before loading any. Your choice here applies if we add them.",
+    body: "Aggregate usage statistics for the public pages of altvivo.bio (Google Analytics). Nothing is loaded unless you allow it, and signed-in pages are never measured. XPRISM asks separately on its own pages.",
   },
   {
     key: "marketing",

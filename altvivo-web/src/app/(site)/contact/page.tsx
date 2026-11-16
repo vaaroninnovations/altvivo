@@ -9,7 +9,7 @@ import { readSession } from "@/lib/server/session";
 
 export const metadata: Metadata = {
   title: "Contact",
-  description: "Contact AltVivo for licences, institutional quotations, technical support, billing and privacy requests.",
+  description: "Contact AltVivo about subscriptions, aMaze pay per use, technical support, billing and privacy requests.",
 };
 export const dynamic = "force-dynamic";
 
@@ -19,7 +19,7 @@ export default async function ContactPage({ searchParams }: { searchParams: Prom
   const { session } = await readSession();
   const category = (CONTACT_CATEGORIES.find((c) => c.value === topic)?.value ?? "sales") as ContactCategory;
   const channels = [
-    { Icon: Building2, title: "Licences & institutions", body: "Quotations, purchase orders, site licences.", email: L.salesEmail },
+    { Icon: Building2, title: "Subscriptions & sales", body: "XPRISM and aMaze subscriptions, aMaze pay per use.", email: L.salesEmail },
     { Icon: LifeBuoy, title: "Support & billing", body: "Help with XPRISM, aMaze, invoices and payments.", email: L.supportEmail },
     { Icon: ShieldCheck, title: "Privacy & grievances", body: `${L.grievanceName}: data requests and complaints.`, email: L.grievanceEmail },
   ];
@@ -29,7 +29,7 @@ export default async function ContactPage({ searchParams }: { searchParams: Prom
       <div className="mx-auto grid max-w-6xl gap-12 px-4 py-16 sm:px-6 lg:grid-cols-[1fr_1.3fr] lg:py-20">
         <div>
           <SectionHeading eyebrow="Contact" title="Talk to the AltVivo team">
-            We reply within one working day. For an institutional quotation, tell us the number of seats and your procurement timeline.
+            We reply within one working day. For aMaze pay per use, tell us roughly how many videos you plan to analyse.
           </SectionHeading>
           <ul className="mt-10 space-y-4">
             {channels.map(({ Icon, title, body, email }) => (

@@ -4,7 +4,7 @@ import { legalInfo, POLICY_EFFECTIVE, POLICY_VERSION } from "@/lib/legal";
 
 export const metadata: Metadata = {
   title: "Terms & Conditions",
-  description: "Licence terms for AltVivo: single-user and institutional licences, acceptable use, fees and GST, refunds and cancellation, and governing law.",
+  description: "Licence terms for AltVivo: XPRISM and aMaze subscriptions, acceptable use, fees and GST, refunds and cancellation, and governing law.",
 };
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,7 @@ const TOC = [
   { id: "agreement", label: "The agreement" },
   { id: "definitions", label: "Definitions" },
   { id: "accounts", label: "Accounts & security" },
-  { id: "licences", label: "Licences & seats" },
+  { id: "licences", label: "Licences" },
   { id: "use", label: "Acceptable use & no sharing" },
   { id: "science", label: "Educational & research use" },
   { id: "content", label: "Your content" },
@@ -55,10 +55,11 @@ export default function TermsPage() {
           <strong>Applications</strong>: the software offered on <code>*.altvivo.bio</code> subdomains, currently XPRISM and aMaze, and any application we add.
         </li>
         <li>
-          <strong>Licence</strong>: the right to use one or more Applications for a paid period (&quot;Term&quot;), as shown on your invoice.
+          <strong>Licence</strong>: the right to use one or more Applications for a period (&quot;Term&quot;): a paid period shown on your invoice, or the
+          Free Month described in section 4.5.
         </li>
         <li>
-          <strong>User</strong>: an individual with an AltVivo account. <strong>Seat</strong>: the right of one named User to use an institutional Licence.
+          <strong>User</strong>: an individual with an AltVivo account. <strong>Account</strong>: one subscription and the Users it covers.
         </li>
         <li>
           <strong>Your Content</strong>: data, files, videos and results you create in or upload to the Services.
@@ -73,27 +74,26 @@ export default function TermsPage() {
         <li>You must be at least 18, or enrolled by your institution with the consent of a parent or lawful guardian.</li>
       </ul>
 
-      <h2 id="licences">4. Licences and seats</h2>
+      <h2 id="licences">4. Licences</h2>
       <h3>4.1 Grant</h3>
       <p>
-        For the Term you have paid for, we grant you a non-exclusive, non-transferable, non-sublicensable licence to access and use the Applications included in
+        For the Term you have paid for, or for your Free Month, we grant you a non-exclusive, non-transferable, non-sublicensable licence to access and use the Applications included in
         your plan, through the Services, for your own teaching, learning or research. Access is checked on every visit and ends automatically when the Term ends
         or the Licence is cancelled or refunded.
       </p>
-      <h3>4.2 Single-app and Dual-Suite licences</h3>
+      <h3>4.2 XPRISM subscription</h3>
       <p>
-        These are personal to one named User. They cover one Application (single-app) or XPRISM and aMaze together (Dual-Suite) and may not be shared, transferred
-        or used by anyone else.
+        XPRISM is sold as a yearly subscription per Account. One Account covers up to 100 student Users and up to 4 teacher Users of one college, department
+        or class. Each of them has their own sign-in; the limits may not be exceeded by sharing sign-ins, and a larger class needs a further Account.
       </p>
-      <h3>4.3 Institutional site licences</h3>
+      <h3>4.3 aMaze subscription and pay per use</h3>
       <ul>
-        <li>A site licence is bought by an institution for a number of Seats. Each Seat is used by one named User at a time.</li>
+        <li>The yearly aMaze subscription is for one Account and covers an unlimited number of animals and videos during the Term.</li>
         <li>
-          Members join with an email address on the institution&apos;s whitelisted domains or are added by its administrator, while Seats are available. Disabled
-          members free their Seat; the administrator may reassign Seats, but not split one Seat between several people.
+          With pay per use, there is no yearly fee: you are charged the per-video price shown on the pricing page for each animal or video that is tracked
+          and analysed. A video that has been analysed is chargeable even if you do not use the result.
         </li>
-        <li>The institution must not exceed its Seats; to add Users it can buy more Seats at the prevailing price, pro rata to the end of the Term where agreed.</li>
-        <li>The institution is responsible for its administrators&apos; actions and for removing members who leave.</li>
+        <li>XPRISM and aMaze are separate products. A subscription to one does not include the other.</li>
       </ul>
       <h3>4.4 Complimentary access</h3>
       <p>
@@ -101,10 +101,30 @@ export default function TermsPage() {
         and creates no entitlement to future access.
       </p>
 
+      <h3 id="free-month">4.5 One month free</h3>
+      <ul>
+        <li>
+          You may ask for one period of free access to the Applications (the &quot;Free Month&quot;, normally 30 days) using the request form. We review each
+          request and may approve or decline it at our discretion.
+        </li>
+        <li>
+          The Free Month is personal to one named User and there is one per person. It starts when we switch your access on, which needs an AltVivo account
+          with a verified email address, and it covers the Applications named in our approval.
+        </li>
+        <li>
+          We do not ask for payment details for the Free Month and <strong>nothing is charged when it ends</strong>. Access to the Applications then stops until
+          you or your institution buys a Licence. Your account and the content you created are kept as described in our Privacy Policy.
+        </li>
+        <li>
+          All of these Terms apply during the Free Month, including sections 5 and 6. We may end a Free Month early if these Terms are breached or the request
+          was made with false information. The Services are provided during the Free Month without any service commitment.
+        </li>
+      </ul>
+
       <h2 id="use">5. Acceptable use and the no-sharing rule</h2>
       <p>You must not, and must not allow others to:</p>
       <ul>
-        <li>share login credentials, let more than one person use a single-user Licence or Seat, or use one account from several people&apos;s devices;</li>
+        <li>share login credentials, let more people use an Account than it covers, or let several people use one sign-in;</li>
         <li>resell, rent, sublicense or provide the Applications to third parties, or use them to build a competing product;</li>
         <li>copy, scrape, frame or systematically download Application content, simulations, images or text, except exports the Application provides;</li>
         <li>reverse engineer, decompile or bypass the licence check, rate limits or other technical protections;</li>
@@ -158,24 +178,19 @@ export default function TermsPage() {
       <ul>
         <li>
           Prices are shown on the <a href="/pricing">pricing page</a> and <strong>exclude GST</strong>. Customers in India pay GST at the applicable rate (CGST
-          and SGST, or IGST) and receive a GST tax invoice; add your GSTIN before paying for a B2B invoice. Customers outside India are billed in US dollars as a
-          zero-rated export of services; any local taxes or bank charges in your country are your responsibility.
+          and SGST, or IGST) and receive a GST tax invoice; add your GSTIN before paying for a B2B invoice. All prices and invoices are in Indian rupees.
         </li>
         <li>
-          The billing country of your billing details decides the currency: India is billed in INR through Razorpay, other countries in USD through Stripe. Card,
-          UPI and bank details are handled by the payment processor under its own terms.
+          Online payments are taken in Indian rupees through Razorpay, for billing addresses in India. Card, UPI and bank details are handled by the
+          payment processor under its own terms. Buyers outside India can write to us to arrange a purchase.
         </li>
         <li>
-          <strong>Prepaid Terms.</strong> Most Licences are prepaid for a month or a year and do not renew automatically. You can renew before the Term ends; the
+          <strong>Prepaid Terms.</strong> Subscriptions are prepaid for a year and do not renew automatically. You can renew before the Term ends; the
           new Term then starts when the current one ends. We send a reminder before a prepaid Term ends.
         </li>
         <li>
           <strong>Automatic renewal.</strong> Plans shown as renewing automatically are charged at the start of each period until you cancel renewal in Billing;
           cancellation takes effect at the end of the current period.
-        </li>
-        <li>
-          <strong>Institutions.</strong> A proforma invoice is a quotation, valid for the period printed on it. The Licence starts when we receive payment in
-          full and issue the tax invoice. Price changes do not affect a proforma within its validity.
         </li>
         <li>We may change prices for future Terms; the price you paid applies to the current Term.</li>
       </ul>
@@ -183,7 +198,10 @@ export default function TermsPage() {
       <h2 id="refunds">10. Refund and cancellation policy</h2>
       <ol>
         <li>
-          <strong>First purchase, 7 days.</strong> If you buy a single-app or Dual-Suite plan for the first time, you may cancel within 7 days of payment for a
+          <strong>Free Month.</strong> The Free Month (section 4.5) costs nothing, so there is nothing to refund or cancel; it simply ends.
+        </li>
+        <li>
+          <strong>First purchase, 7 days.</strong> If you buy a subscription for the first time, you may cancel within 7 days of payment for a
           full refund.
         </li>
         <li>
@@ -194,8 +212,7 @@ export default function TermsPage() {
           <strong>Cancelling renewal.</strong> You can stop an automatic renewal at any time; access continues until the end of the period already paid for.
         </li>
         <li>
-          <strong>Site licences.</strong> An institutional Licence may be cancelled for a full refund before any member has used it, and within 7 days of
-          activation. After that, refunds follow the purchase order or written agreement; without one, unused Seats are not refundable.
+          <strong>Pay per use.</strong> Charges for videos already analysed are not refundable.
         </li>
         <li>
           <strong>Duplicate or failed payments.</strong> If you are charged twice, or charged for a payment that did not activate a Licence, we refund the extra
@@ -225,7 +242,7 @@ export default function TermsPage() {
       <ul>
         <li>You may close your account at any time. Closing does not by itself refund a paid Term (see section 10).</li>
         <li>
-          We may suspend or end an account, Licence or Seat if you materially breach these Terms (including section 5), do not pay, or if we must do so by law.
+          We may suspend or end an account or Licence if you materially breach these Terms (including section 5), do not pay, or if we must do so by law.
           Where reasonable, we will warn you first and give you an opportunity to fix the problem.
         </li>
         <li>

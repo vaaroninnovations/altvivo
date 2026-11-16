@@ -25,11 +25,11 @@ export default async function WorkspaceLayout({ children }: { children: React.Re
               <Link
                 href="/workspace/billing"
                 className="readout hidden h-8 items-center gap-1.5 rounded-full border border-line px-3 text-xs hover:border-accent sm:flex"
-                title="Compute credits remaining"
+                title="Pay per use: analyses left (one per animal / video)"
               >
                 <Zap className="size-3.5 text-accent-ink" aria-hidden />
                 {new Intl.NumberFormat("en-IN").format(s.creditsRemaining)}
-                <span className="text-subtle">credits</span>
+                <span className="text-subtle">analyses</span>
               </Link>
             )}
             <div className="hidden md:block">

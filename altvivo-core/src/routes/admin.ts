@@ -89,7 +89,7 @@ export default async function adminRoutes(app: FastifyInstance, d: Deps) {
   // =========================================================== dashboard ===
   app.get('/v1/api/admin/dashboard', opts, async () => {
     const q = d.prisma.$queryRaw.bind(d.prisma);
-    const [mrr, byApp, kinds, sessions, waitlist, revenue, users, proformas] = await Promise.all([
+    const [mrr, byApp, kinds, sessions, waitlist, revenue, users, proformas, trials, unreadMail] = await Promise.all([
       q<{ currency: string; mrr: bigint; subs: number }[]>`
         SELECT currency, coalesce(sum(mrr_minor), 0)::bigint AS mrr, count(*)::int AS subs FROM revenue_active_subscriptions GROUP BY currency`,
       q<{ app_id: string; holders: number; seats: number }[]>`
@@ -103,7 +103,8 @@ export default async function adminRoutes(app: FastifyInstance, d: Deps) {
           SELECT e.app_id, coalesce(e.user_id::text, 'org:' || e.org_id::text) AS holder,
                  CASE WHEN e.org_id IS NULL THEN 1 ELSE o.seat_limit END AS seats
             FROM app_entitlements e LEFT JOIN organizations o ON o.id = e.org_id
-           WHERE e.source = 'MANUAL' AND e.revoked_at IS NULL AND e.starts_at <= now() AND e.expires_at > now())
+           WHERE e.source = 'MANUAL' AND e.revoked_at IS NULL AND e.starts_at <= now() AND e.expires_at > now()
+             AND coalesce(e.reference, '') NOT LIKE 'TRIAL-%')
         SELECT app_id, count(DISTINCT holder)::int AS holders, coalesce(sum(seats), 0)::int AS seats
           FROM (SELECT * FROM subs UNION ALL SELECT * FROM manual) x GROUP BY app_id`,
       q<{ kind: string; subs: number; seats: number }[]>`
@@ -129,6 +130,14 @@ export default async function adminRoutes(app: FastifyInstance, d: Deps) {
       q<{ open: number; currency: string; total: bigint }[]>`
         SELECT count(*)::int AS open, currency, coalesce(sum(total_minor), 0)::bigint AS total
           FROM invoices WHERE kind = 'PROFORMA' AND status = 'ISSUED' AND valid_until >= current_date GROUP BY currency`,
+      q<{ pending: number; approved: number; active: number; ended: number; declined: number }[]>`
+        SELECT count(*) FILTER (WHERE status = 'PENDING')::int AS pending,
+               count(*) FILTER (WHERE status = 'APPROVED')::int AS approved,
+               count(*) FILTER (WHERE status = 'ACTIVE' AND ends_at > now())::int AS active,
+               count(*) FILTER (WHERE status = 'ACTIVE' AND ends_at <= now())::int AS ended,
+               count(*) FILTER (WHERE status = 'DECLINED')::int AS declined
+          FROM trial_requests`,
+      d.prisma.mailMessage.count({ where: { folder: 'INBOX', isRead: false } }),
     ]);
     const n = (v: bigint) => Number(v);
     return {
@@ -141,6 +150,9 @@ export default async function adminRoutes(app: FastifyInstance, d: Deps) {
       revenueLast30Days: revenue.map((r) => ({ currency: r.currency, grossMinor: n(r.gross), taxMinor: n(r.tax), refundedMinor: n(r.refunded), netMinor: n(r.gross - r.tax - r.refunded), payments: r.payments })),
       users: users[0],
       openProformas: proformas.map((p) => ({ currency: p.currency, count: p.open, totalMinor: n(p.total) })),
+      /** "One month free" requests: waiting for a decision, approved but not started, running, finished. */
+      freeMonth: trials[0] ?? { pending: 0, approved: 0, active: 0, ended: 0, declined: 0 },
+      mailbox: { unread: unreadMail },
     };
   });
 

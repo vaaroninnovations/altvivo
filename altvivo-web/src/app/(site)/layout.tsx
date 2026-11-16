@@ -1,11 +1,15 @@
 import { SiteFooter, SiteHeader } from "@/components/site";
+import { TrialBanner } from "@/components/trial";
+import { getTrialOffer } from "@/lib/server/core";
 
-export default function SiteLayout({ children }: { children: React.ReactNode }) {
+export default async function SiteLayout({ children }: { children: React.ReactNode }) {
+  const offer = await getTrialOffer();
   return (
     <div className="flex min-h-dvh flex-col">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 focus:rounded-lg focus:bg-surface focus:px-3 focus:py-2">
         Skip to content
       </a>
+      <TrialBanner days={offer.days} appNames={offer.apps.map((a) => a.name)} />
       <SiteHeader />
       <main id="main" className="flex-1">
         {children}

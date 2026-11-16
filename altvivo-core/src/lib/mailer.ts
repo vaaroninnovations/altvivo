@@ -8,6 +8,8 @@ export interface MailMessage {
   html: string;
   /** Validated address only (e.g. the sender of a contact enquiry). */
   replyTo?: string;
+  /** Validated addresses only (mailbox compose). */
+  cc?: string[];
 }
 
 export interface Mailer {
@@ -37,19 +39,40 @@ export class SmtpMailer implements Mailer {
 const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
-function layout(title: string, bodyHtml: string): string {
-  return `<!doctype html><html><body style="margin:0;background:#F8FAFC;font-family:Inter,Segoe UI,Arial,sans-serif;color:#0B0F19">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
-<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border:1px solid #E2E8F0;border-radius:12px">
-<tr><td style="padding:24px 28px;border-bottom:1px solid #E2E8F0;font-weight:700;font-size:18px;color:#0EA5E9">AltVivo</td></tr>
-<tr><td style="padding:28px"><h1 style="margin:0 0 16px;font-size:20px">${escapeHtml(title)}</h1>${bodyHtml}</td></tr>
-<tr><td style="padding:16px 28px;border-top:1px solid #E2E8F0;font-size:12px;color:#64748B">You received this because of activity on your AltVivo account. If this was not you, you can ignore this email.</td></tr>
+/** Brand settings for every email (set once at start-up from the configuration). */
+const brand = { webOrigin: 'https://altvivo.bio', supportEmail: 'support@altvivo.bio', legalName: 'Aaron Innovations' };
+export function configureMailBrand(b: Partial<typeof brand>): void {
+  Object.assign(brand, Object.fromEntries(Object.entries(b).filter(([, v]) => !!v)));
+}
+
+const INK = '#16132F';
+const MUTED = '#5B5876';
+const LINE = '#E6E3F3';
+const FONT = "'IBM Plex Sans','Segoe UI',Helvetica,Arial,sans-serif";
+
+/**
+ * The AltVivo email template: logo header on the brand gradient rule, a white
+ * card for the content, and a footer with the sender's identity. Table layout
+ * and inline styles only, so it renders the same in Gmail, Outlook and Apple Mail.
+ */
+function layout(title: string, bodyHtml: string, footer = 'You received this because of activity on your AltVivo account. If this was not you, you can ignore this email.'): string {
+  const web = brand.webOrigin;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${escapeHtml(title)}</title></head>
+<body style="margin:0;padding:0;background:#F4F2FB;font-family:${FONT};color:${INK};-webkit-text-size-adjust:100%">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F4F2FB"><tr><td align="center" style="padding:32px 16px">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid ${LINE};border-radius:16px;overflow:hidden">
+<tr><td style="height:4px;line-height:4px;font-size:0;background:#4B1FD8;background-image:linear-gradient(90deg,#0A2BDB,#4B1FD8 55%,#9D0BEF)">&nbsp;</td></tr>
+<tr><td style="padding:24px 32px 20px;border-bottom:1px solid ${LINE}"><a href="${escapeHtml(web)}" style="text-decoration:none"><img src="${escapeHtml(web)}/brand/altvivo-wordmark.png" width="150" height="29" alt="AltVivo" style="display:block;border:0;height:29px;width:150px;color:#4B1FD8;font-size:20px;font-weight:700"></a></td></tr>
+<tr><td style="padding:32px;font-size:15px;line-height:1.65;color:${INK}"><h1 style="margin:0 0 18px;font-size:22px;line-height:1.3;font-weight:600;color:${INK}">${escapeHtml(title)}</h1>${bodyHtml}</td></tr>
+<tr><td style="padding:20px 32px;border-top:1px solid ${LINE};background:#FBFAFE;font-size:12px;line-height:1.6;color:${MUTED}">${escapeHtml(footer)}<br><br>
+<strong style="color:${INK}">AltVivo</strong> · a product of ${escapeHtml(brand.legalName)}<br>
+<a href="${escapeHtml(web)}" style="color:#4B1FD8;text-decoration:none">altvivo.bio</a> · <a href="mailto:${escapeHtml(brand.supportEmail)}" style="color:#4B1FD8;text-decoration:none">${escapeHtml(brand.supportEmail)}</a> · <a href="${escapeHtml(web)}/privacy" style="color:#4B1FD8;text-decoration:none">Privacy</a> · <a href="${escapeHtml(web)}/terms" style="color:#4B1FD8;text-decoration:none">Terms</a></td></tr>
 </table></td></tr></table></body></html>`;
 }
 
 const button = (href: string, label: string) =>
-  `<p style="margin:24px 0"><a href="${escapeHtml(href)}" style="background:#0EA5E9;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:600;display:inline-block">${escapeHtml(label)}</a></p>
-<p style="font-size:12px;color:#64748B;word-break:break-all">Or paste this link into your browser:<br>${escapeHtml(href)}</p>`;
+  `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:26px 0 18px"><tr><td style="border-radius:10px;background:#4B1FD8;background-image:linear-gradient(90deg,#2A22DB,#7A14E6)"><a href="${escapeHtml(href)}" style="display:inline-block;padding:13px 24px;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;border-radius:10px">${escapeHtml(label)}</a></td></tr></table>
+<p style="font-size:12px;color:${MUTED};word-break:break-all;margin:0 0 4px">Or paste this link into your browser:<br>${escapeHtml(href)}</p>`;
 
 export const templates = {
   verifyEmail(name: string, link: string): Omit<MailMessage, 'to'> {
@@ -114,6 +137,54 @@ export const templates = {
       subject: `We received your message: ${subject}`,
       text: `Hi ${name},\n\nThanks for contacting AltVivo. Our team usually replies within one working day.`,
       html: layout('We received your message', `<p>Hi ${escapeHtml(name)},</p><p>Thanks for contacting AltVivo about <strong>${escapeHtml(subject)}</strong>. Our team usually replies within one working day.</p>`),
+    };
+  },
+  trialRequestNotification(m: { name: string; email: string; institution: string; designation: string | null; apps: string[]; useCase: string; id: string }, link: string): Omit<MailMessage, 'to'> {
+    const lines = [`From: ${m.name} <${m.email}>`, `Institution: ${m.institution}`, m.designation ? `Role: ${m.designation}` : null, `Applications: ${m.apps.join(', ')}`, `Reference: ${m.id}`].filter(Boolean) as string[];
+    return {
+      subject: `[AltVivo free month] ${m.name}, ${m.institution}`,
+      text: `${lines.join('\n')}\n\n${m.useCase}\n\nReview: ${link}`,
+      html: layout('One month free: new request', `<p>${lines.map(escapeHtml).join('<br>')}</p><p style="white-space:pre-wrap">${escapeHtml(m.useCase)}</p>${button(link, 'Review request')}`),
+    };
+  },
+  trialRequestReceived(name: string, days: number): Omit<MailMessage, 'to'> {
+    return {
+      subject: 'We received your request for one month free on AltVivo',
+      text: `Hi ${name},\n\nThanks for requesting ${days} days of free access to AltVivo. Our team reviews every request, usually within one working day, and you will hear from us by email.\n\nNo payment details are needed for the free month.`,
+      html: layout('Your free month request', `<p>Hi ${escapeHtml(name)},</p><p>Thanks for requesting <strong>${days} days of free access</strong> to AltVivo. Our team reviews every request, usually within one working day, and you will hear from us by email.</p><p>No payment details are needed for the free month.</p>`),
+    };
+  },
+  trialApproved(name: string, days: number, apps: string[], link: string, o: { active: boolean; endsOn: string | null }): Omit<MailMessage, 'to'> {
+    const list = apps.join(' and ');
+    const how = o.active
+      ? `Your free access to ${list} is active now${o.endsOn ? ` and runs until ${o.endsOn}` : ''}.`
+      : `Create your AltVivo account with this email address and verify it: your ${days} days of free access to ${list} start the moment you do.`;
+    return {
+      subject: `Your free month on AltVivo is ${o.active ? 'active' : 'approved'}`,
+      text: `Hi ${name},\n\nGood news: your request for one month free was approved. ${how}\n\n${link}\n\nWhen the free month ends, access stops unless you choose a plan. Nothing is charged automatically.`,
+      html: layout(o.active ? 'Your free month is active' : 'Your free month is approved', `<p>Hi ${escapeHtml(name)},</p><p>Good news: your request for one month free was approved. ${escapeHtml(how)}</p>${button(link, o.active ? 'Open my applications' : 'Create my account')}<p>When the free month ends, access stops unless you choose a plan. Nothing is charged automatically.</p>`),
+    };
+  },
+  trialDeclined(name: string, note: string | null, link: string): Omit<MailMessage, 'to'> {
+    return {
+      subject: 'About your request for one month free on AltVivo',
+      text: `Hi ${name},\n\nThank you for your interest in AltVivo. We are not able to offer the free month for this request.${note ? `\n\n${note}` : ''}\n\nYou can still start with a monthly plan, or ask us about an institutional licence:\n${link}`,
+      html: layout('About your free month request', `<p>Hi ${escapeHtml(name)},</p><p>Thank you for your interest in AltVivo. We are not able to offer the free month for this request.</p>${note ? `<p>${escapeHtml(note)}</p>` : ''}<p>You can still start with a monthly plan, or ask us about an institutional licence.</p>${button(link, 'See plans')}`),
+    };
+  },
+  trialEnding(name: string, endsOn: string, link: string): Omit<MailMessage, 'to'> {
+    return {
+      subject: `Your free month on AltVivo ends on ${endsOn}`,
+      text: `Hi ${name},\n\nYour free access ends on ${endsOn}. Choose a plan before then to keep working without a break; your data and exports are kept either way:\n${link}`,
+      html: layout('Your free month is ending', `<p>Hi ${escapeHtml(name)},</p><p>Your free access ends on <strong>${escapeHtml(endsOn)}</strong>. Choose a plan before then to keep working without a break. Your data and exports are kept either way.</p>${button(link, 'Choose a plan')}`),
+    };
+  },
+  /** Mail written by a SuperAdmin in the mailbox: the text as typed, inside the AltVivo template. */
+  adminMessage(subject: string, body: string): Omit<MailMessage, 'to'> {
+    return {
+      subject,
+      text: body,
+      html: layout(subject, `<div style="white-space:pre-wrap">${escapeHtml(body)}</div>`, 'This message was sent to you by the AltVivo team. You can reply to this email.'),
     };
   },
   appLaunched(appName: string, link: string): Omit<MailMessage, 'to'> {

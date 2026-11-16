@@ -1,14 +1,20 @@
 import type { MetadataRoute } from "next";
 import { PUBLIC } from "@/lib/config";
 
+/** Served as /sitemap.xml: every public page. Add a row when a public page is added. */
+const PAGES: [path: string, changeFrequency: "weekly" | "monthly" | "yearly", priority: number][] = [
+  ["/", "weekly", 1],
+  ["/free-month", "monthly", 0.9],
+  ["/pricing", "monthly", 0.9],
+  ["/about", "monthly", 0.8],
+  ["/docs", "monthly", 0.8],
+  ["/contact", "yearly", 0.5],
+  ["/privacy", "yearly", 0.3],
+  ["/terms", "yearly", 0.3],
+  ["/cookies", "yearly", 0.3],
+];
+
 export default function sitemap(): MetadataRoute.Sitemap {
-  return [
-    { url: `${PUBLIC.siteUrl}/`, changeFrequency: "weekly", priority: 1 },
-    { url: `${PUBLIC.siteUrl}/pricing`, changeFrequency: "monthly", priority: 0.9 },
-    { url: `${PUBLIC.siteUrl}/advisory-board`, changeFrequency: "monthly", priority: 0.7 },
-    { url: `${PUBLIC.siteUrl}/contact`, changeFrequency: "yearly", priority: 0.5 },
-    { url: `${PUBLIC.siteUrl}/privacy`, changeFrequency: "yearly", priority: 0.3 },
-    { url: `${PUBLIC.siteUrl}/terms`, changeFrequency: "yearly", priority: 0.3 },
-    { url: `${PUBLIC.siteUrl}/cookies`, changeFrequency: "yearly", priority: 0.3 },
-  ];
+  const lastModified = new Date();
+  return PAGES.map(([path, changeFrequency, priority]) => ({ url: `${PUBLIC.siteUrl}${path}`, lastModified, changeFrequency, priority }));
 }

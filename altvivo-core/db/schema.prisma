@@ -1,11 +1,12 @@
 // =============================================================================
 // AltVivo core database (db_core) - Prisma schema
 // -----------------------------------------------------------------------------
-// Commercial model: STRICT PAID ACCESS. A user may open a spoke only while a
-// paid grant is in force - their own subscription, a Dual-Suite bundle, their
-// institution's site licence, or a manual licence recorded by a SUPERADMIN
-// (offline NEFT / RTGS / purchase order). There is no free tier or trial.
-// SUPERADMIN and ADVISORY_BOARD bypass billing in altvivo-core, not here.
+// Commercial model: ONE MONTH FREE, THEN PAID. A user may open a spoke only
+// while a grant is in force - the one-month free access a SUPERADMIN approved
+// for them (trial_requests), their own subscription, a Dual-Suite bundle,
+// their institution's site licence, or a manual licence recorded by a
+// SUPERADMIN (offline NEFT / RTGS / purchase order). There is no permanent
+// free tier. SUPERADMIN and ADVISORY_BOARD bypass billing in altvivo-core.
 //
 // Objects Prisma cannot model (CHECK constraints, triggers, SECURITY DEFINER
 // functions, views, grants, the audit hash chain, gapless GST invoice
@@ -226,6 +227,26 @@ enum ContactStatus {
   @@map("contact_status")
 }
 
+/// PENDING -> APPROVED (waiting for the account to exist and verify its
+/// e-mail) -> ACTIVE (licences granted; ends_at is the last day), or DECLINED.
+enum TrialStatus {
+  PENDING
+  APPROVED
+  ACTIVE
+  DECLINED
+
+  @@map("trial_status")
+}
+
+enum MailFolder {
+  INBOX
+  SENT
+  DRAFT
+  TRASH
+
+  @@map("mail_folder")
+}
+
 enum ConsentAction {
   ACCEPT_ALL
   REJECT_NON_ESSENTIAL
@@ -277,6 +298,7 @@ model User {
   advisoryProfile AdvisoryBoardMember?
   contactMessages ContactMessage[]
   consentRecords  ConsentRecord[]
+  trialRequests   TrialRequest[]
 
   @@index([orgId])
   @@index([role])
@@ -905,10 +927,82 @@ model ContactMessage {
 
   app  AppRegistry? @relation(fields: [appId], references: [appId], onDelete: SetNull)
   user User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  mail MailMessage[]
 
   @@index([status, createdAt])
   @@index([email])
   @@map("contact_messages")
+}
+
+/// "One month free" request (POST /v1/public/trial-request). Approval by a
+/// SUPERADMIN grants a MANUAL licence per app in appIds with reference
+/// 'TRIAL-<id prefix>' for `days` days, starting when the owner of the e-mail
+/// address has a verified account. One per address (partial unique index).
+model TrialRequest {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String      @db.VarChar(200)
+  email        String      @db.Citext
+  institution  String      @db.VarChar(300)
+  designation  String?     @db.VarChar(120)
+  appIds       String[]    @default([]) @map("app_ids")
+  useCase      String      @map("use_case") @db.VarChar(2000)
+  userId       String?     @map("user_id") @db.Uuid
+  status       TrialStatus @default(PENDING)
+  days         Int         @default(30)
+  decidedBy    String?     @map("decided_by") @db.Uuid
+  decidedAt    DateTime?   @map("decided_at") @db.Timestamptz(6)
+  decisionNote String?     @map("decision_note") @db.VarChar(500)
+  startsAt     DateTime?   @map("starts_at") @db.Timestamptz(6)
+  endsAt       DateTime?   @map("ends_at") @db.Timestamptz(6)
+  ipAddress    String?     @map("ip_address") @db.Inet
+  userAgent    String?     @map("user_agent") @db.VarChar(512)
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  mail MailMessage[]
+
+  @@index([status, createdAt])
+  @@index([userId])
+  @@index([email])
+  @@map("trial_requests")
+}
+
+/// SuperAdmin mailbox. INBOX rows come from the contact form, free-month
+/// requests and the inbound-mail webhook; SENT rows were delivered by SMTP;
+/// DRAFT rows are unsent; TRASH remembers the folder to restore to.
+model MailMessage {
+  id               String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  folder           MailFolder
+  trashedFrom      MailFolder? @map("trashed_from")
+  threadId         String      @map("thread_id") @db.Uuid
+  inReplyTo        String?     @map("in_reply_to") @db.Uuid
+  fromName         String?     @map("from_name") @db.VarChar(200)
+  fromEmail        String      @map("from_email") @db.Citext
+  toEmails         String[]    @default([]) @map("to_emails")
+  ccEmails         String[]    @default([]) @map("cc_emails")
+  subject          String      @db.VarChar(300)
+  body             String      @db.VarChar(20000)
+  isRead           Boolean     @default(false) @map("is_read")
+  isStarred        Boolean     @default(false) @map("is_starred")
+  source           String      @default("compose") @db.VarChar(16) /// compose | contact | trial | inbound | system
+  contactMessageId String?     @map("contact_message_id") @db.Uuid
+  trialRequestId   String?     @map("trial_request_id") @db.Uuid
+  createdBy        String?     @map("created_by") @db.Uuid
+  sentAt           DateTime?   @map("sent_at") @db.Timestamptz(6)
+  deliveryError    String?     @map("delivery_error") @db.VarChar(500)
+  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  parent         MailMessage?    @relation("MailReplies", fields: [inReplyTo], references: [id], onDelete: SetNull)
+  replies        MailMessage[]   @relation("MailReplies")
+  contactMessage ContactMessage? @relation(fields: [contactMessageId], references: [id], onDelete: SetNull)
+  trialRequest   TrialRequest?   @relation(fields: [trialRequestId], references: [id], onDelete: SetNull)
+
+  @@index([folder, createdAt(sort: Desc)])
+  @@index([threadId, createdAt])
+  @@index([fromEmail])
+  @@map("mail_messages")
 }
 
 /// Append-only evidence of cookie / tracking consent (DPDPA 2023 s.6, GDPR

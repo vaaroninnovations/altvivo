@@ -10,7 +10,8 @@
 // Emails are printed to the console; Turnstile uses Cloudflare's test secret
 // (always passes); object storage is in-memory; payments/OAuth are off.
 // Seeds: founder@altvivo.test (SUPERADMIN), researcher@altvivo.test (PI with
-// an active Dual-Suite term) and student@altvivo.test (no licence), plus demo
+// an active Dual-Suite term) and student@altvivo.test (on a running free month), demo
+// free-month requests and SuperAdmin mailbox messages, plus demo
 // advisory-board profiles. Password: see DEV_PASSWORD. Invoicing uses a
 // synthetic seller GSTIN; payment gateways stay off (checkout answers 409).
 // =============================================================================
@@ -189,13 +190,97 @@ const deps = await createDeps(cfg, {
 This text shows how a biography with several paragraphs appears in the advisory-board dialog on altvivo.bio.`, spec, featured],
     );
   }
-  await db.query(`INSERT INTO credit_ledger (user_id, action_type, delta, reference_id) VALUES ($1, 'PLAN_CREDIT_GRANT', 6000, 'dev-grant-1')`, [pi.id]);
-  await db.query(`INSERT INTO credit_ledger (user_id, app_id, action_type, delta, reference_id) VALUES ($1, 'amaze', 'TRACKING_JOB', -45, 'amaze:job-17')`, [pi.id]);
+  await db.query(`INSERT INTO credit_ledger (user_id, action_type, delta, reference_id) VALUES ($1, 'USAGE_PURCHASE', 12, 'dev-grant-1')`, [pi.id]);
+  await db.query(`INSERT INTO credit_ledger (user_id, app_id, action_type, delta, reference_id) VALUES ($1, 'amaze', 'USAGE', -3, 'amaze:job-17')`, [pi.id]);
   for (const [app, ev, res] of [["amaze", "AMAZE.TRIAL_RECORDED", "trial-17"], ["xprism", "XPRISM.EXPERIMENT_SUBMITTED", "organ-bath-07"], ["amaze", "AMAZE.TRIAL_RECORDED", "trial-18"]]) {
     await db.query(`INSERT INTO audit_logs (actor_type, actor_id, app_id, event_type, resource_id) VALUES ('SERVICE', $1, $2, $3, $4)`, [pi.id, app, ev, res]);
   }
   await db.query(`INSERT INTO app_waitlist (user_id, email, app_id, source) VALUES ($1, 'researcher@altvivo.test', 'stat', 'workspace')`, [pi.id]);
   await db.query(`INSERT INTO app_waitlist (email, app_id, source) VALUES ('early1@lab.test','pharmadme','web'), ('early2@lab.test','pharmadme','coming-soon')`);
+  // ---- one month free: a running free month, two requests waiting, one declined
+  const { rows: [student] } = await db.query(`SELECT id FROM users WHERE email = 'student@altvivo.test'`);
+  const { rows: [running] } = await db.query(
+    `INSERT INTO trial_requests (name, email, institution, designation, app_ids, use_case, user_id, status, days, decided_by, decided_at, starts_at, ends_at, updated_at)
+     VALUES ('Rahul Student', 'student@altvivo.test', 'Dev College of Pharmacy', 'B.Pharm student', ARRAY['xprism','amaze'], 'Practising organ-bath experiments before the practical exam.',
+             $1, 'ACTIVE', 30, $2, now() - interval '9 days', now() - interval '9 days', now() + interval '21 days', now()) RETURNING id`,
+    [student.id, founder.id],
+  );
+  for (const appId of ["xprism", "amaze"]) {
+    await db.query(
+      `INSERT INTO app_entitlements (app_id, source, user_id, granted_by, starts_at, expires_at, reason, reference)
+       VALUES ($1, 'MANUAL', $2, $3, now() - interval '9 days', now() + interval '21 days', 'One month free (30 days)', $4)`,
+      [appId, student.id, founder.id, `TRIAL-${running.id.slice(0, 8).toUpperCase()}`],
+    );
+  }
+  const pending = [
+    ["Dr. Meera Nair", "meera.nair@pharmacy.test", "Kerala Institute of Pharmaceutical Sciences", "Associate Professor", ["xprism", "amaze"], "We teach 120 B.Pharm students each year and want to evaluate XPRISM for the pharmacology practicals before the next academic council meeting.", "2 hours"],
+    ["Arjun Mehta", "arjun.mehta@neurolab.test", "Centre for Behavioural Neuroscience", "PhD scholar", ["amaze"], "Scoring elevated plus maze videos for my thesis; I would like to compare aMaze tracking with our manual scoring.", "26 hours"],
+  ];
+  for (const [name, email, inst, role, apps, why, ago] of pending) {
+    const { rows: [t] } = await db.query(
+      `INSERT INTO trial_requests (name, email, institution, designation, app_ids, use_case, days, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,30, now() - $7::interval, now()) RETURNING id`,
+      [name, email, inst, role, apps, why, ago],
+    );
+    await db.query(
+      `INSERT INTO mail_messages (folder, thread_id, from_name, from_email, to_emails, subject, body, source, trial_request_id, created_at, updated_at)
+       VALUES ('INBOX', gen_random_uuid(), $1, $2, ARRAY['support@altvivo.test'], $3, $4, 'trial', $5, now() - $6::interval, now())`,
+      [name, email, `One month free: ${name}, ${inst}`, `${role}, ${inst}\nApplications: ${apps.join(", ")}\n\n${why}`, t.id, ago],
+    );
+  }
+  await db.query(
+    `INSERT INTO trial_requests (name, email, institution, app_ids, use_case, status, days, decided_by, decided_at, decision_note, created_at, updated_at)
+     VALUES ('Test Account', 'qwerty@mailbox.test', 'None', ARRAY['xprism'], 'just looking around', 'DECLINED', 30, $1, now() - interval '3 days', 'No institution or use case given', now() - interval '4 days', now())`,
+    [founder.id],
+  );
+
+  // ---- SuperAdmin mailbox: an enquiry with our reply and the customer's answer, a draft, a sent announcement
+  const { rows: [enquiry] } = await db.query(
+    `INSERT INTO contact_messages (name, email, institution, category, subject, message, status, handled_by, handled_at, created_at, updated_at)
+     VALUES ('Prof. Kavita Sharma', 'kavita.sharma@university.test', 'State University College of Pharmacy', 'institutional', 'Site licence for 180 students',
+             'We would like a quotation for a site licence covering XPRISM and aMaze for 180 students and 12 faculty. Our purchase committee meets on the 28th.', 'IN_PROGRESS', $1, now() - interval '20 hours', now() - interval '2 days', now()) RETURNING id`,
+    [founder.id],
+  );
+  const { rows: [m1] } = await db.query(
+    `INSERT INTO mail_messages (folder, thread_id, from_name, from_email, to_emails, subject, body, is_read, source, contact_message_id, created_at, updated_at)
+     VALUES ('INBOX', gen_random_uuid(), 'Prof. Kavita Sharma', 'kavita.sharma@university.test', ARRAY['support@altvivo.test'], 'Site licence for 180 students',
+             'We would like a quotation for a site licence covering XPRISM and aMaze for 180 students and 12 faculty. Our purchase committee meets on the 28th.', true, 'contact', $1, now() - interval '2 days', now()) RETURNING id, thread_id`,
+    [enquiry.id],
+  );
+  const { rows: [m2] } = await db.query(
+    `INSERT INTO mail_messages (folder, thread_id, in_reply_to, from_name, from_email, to_emails, subject, body, is_read, source, contact_message_id, created_by, sent_at, created_at, updated_at)
+     VALUES ('SENT', $1, $2, 'AltVivo', 'no-reply@altvivo.bio', ARRAY['kavita.sharma@university.test'], 'Re: Site licence for 180 students',
+             E'Dear Prof. Sharma,\n\nThank you for writing. A proforma invoice for 192 seats is on its way to you; it is valid for 30 days and carries our bank details for NEFT / RTGS.\n\nYour department can also start with one month free while procurement is in progress.\n\nRegards,\nAltVivo', true, 'compose', $3, $4, now() - interval '20 hours', now() - interval '20 hours', now()) RETURNING id`,
+    [m1.thread_id, m1.id, enquiry.id, founder.id],
+  );
+  await db.query(
+    `INSERT INTO mail_messages (folder, thread_id, in_reply_to, from_name, from_email, to_emails, subject, body, source, is_starred, created_at, updated_at)
+     VALUES ('INBOX', $1, $2, 'Prof. Kavita Sharma', 'kavita.sharma@university.test', ARRAY['support@altvivo.test'], 'RE: Site licence for 180 students',
+             E'Thank you, received. Could the proforma mention our GSTIN 27AAAAA0000A1Z5? We will also take up the free month for the faculty.', 'inbound', true, now() - interval '3 hours', now())`,
+    [m1.thread_id, m2.id],
+  );
+  const { rows: [support] } = await db.query(
+    `INSERT INTO contact_messages (name, email, category, subject, message, app_id, created_at, updated_at)
+     VALUES ('Sanjay Verma', 'sanjay.verma@college.test', 'support', 'Tail-flick latency not saving', 'In XPRISM the tail-flick readings disappear when I switch to the next animal. Chrome on Windows 11.', 'xprism', now() - interval '50 minutes', now()) RETURNING id`,
+  );
+  await db.query(
+    `INSERT INTO mail_messages (folder, thread_id, from_name, from_email, to_emails, subject, body, source, contact_message_id, created_at, updated_at)
+     VALUES ('INBOX', gen_random_uuid(), 'Sanjay Verma', 'sanjay.verma@college.test', ARRAY['support@altvivo.test'], 'Tail-flick latency not saving',
+             'In XPRISM the tail-flick readings disappear when I switch to the next animal. Chrome on Windows 11.', 'contact', $1, now() - interval '50 minutes', now())`,
+    [support.id],
+  );
+  await db.query(
+    `INSERT INTO mail_messages (folder, thread_id, from_name, from_email, to_emails, subject, body, is_read, source, created_by, created_at, updated_at)
+     VALUES ('DRAFT', gen_random_uuid(), 'AltVivo', 'no-reply@altvivo.bio', ARRAY['deans@pharmacy-council.test'], 'One month free for your pharmacology department',
+             E'Dear colleague,\n\nEvery faculty member and student can now try XPRISM and aMaze free for one month.\n\n', true, 'compose', $1, now() - interval '5 hours', now())`,
+    [founder.id],
+  );
+  await db.query(
+    `INSERT INTO mail_messages (folder, thread_id, from_name, from_email, to_emails, cc_emails, subject, body, is_read, source, created_by, sent_at, created_at, updated_at)
+     VALUES ('SENT', gen_random_uuid(), 'AltVivo', 'no-reply@altvivo.bio', ARRAY['advisory.board@altvivo.test'], ARRAY['founder@altvivo.test'], 'Advisory board: one month free launches this week',
+             E'Dear members,\n\nFrom this week every new researcher can request one month of free access. Requests are reviewed by the admin team.\n\nRegards,\nFounder', true, 'compose', $1, now() - interval '4 days', now() - interval '4 days', now())`,
+    [founder.id],
+  );
   await db.end();
   console.log(`[dev] seeded founder ${founder.id} and researcher ${pi.id}`);
 }

@@ -1,13 +1,14 @@
-import { headers } from "next/headers";
-import { ArrowRight, BadgeCheck, Building2, Check, FileText, Fingerprint, Lock, ScrollText, ShieldCheck, Users } from "lucide-react";
-import { MemberCard } from "@/components/advisory";
+import { ArrowRight, BadgeCheck, Check, FileText, Fingerprint, Gift, Lock, ScrollText, ShieldCheck } from "lucide-react";
 import { AppIcon, AppLogo, hasAppLogo } from "@/components/brand";
 import { HeroReadout } from "@/components/hero-readout";
+import { HeroVideos } from "@/components/hero-videos";
 import { Reveal } from "@/components/motion";
+import { TrialSteps } from "@/components/trial";
 import { ButtonLink, Card, SectionHeading, StatusBadge } from "@/components/ui";
 import { isAvailable } from "@/lib/catalog";
-import { formatMoney, perMonth } from "@/lib/money";
-import { getAdvisoryBoard, getCatalog, getPublicApps } from "@/lib/server/core";
+import { formatMoney } from "@/lib/money";
+import { getCatalog, getPublicApps, getTrialOffer } from "@/lib/server/core";
+import { trialLength } from "@/lib/trial";
 import type { CatalogResponse, PublicApp } from "@/lib/types";
 
 /** What each flagship product covers (copy for the product cards; status and version come from the registry). */
@@ -42,11 +43,10 @@ function fromPrice(catalog: CatalogResponse | null, appId: string): string | nul
   if (!catalog) return null;
   const singles = catalog.plans.filter((p) => p.kind === "SINGLE_APP" && p.apps.includes(appId));
   if (!singles.length) return null;
-  const cheapest = Math.min(...singles.map((p) => perMonth(p, catalog.currency)));
-  return `${formatMoney(cheapest, catalog.currency, { round: true })}/month`;
+  return `${formatMoney(Math.min(...singles.map((p) => p.prices[catalog.currency])), catalog.currency, { whole: true })}/year`;
 }
 
-function ProductCard({ app, catalog, index }: { app: PublicApp; catalog: CatalogResponse | null; index: number }) {
+function ProductCard({ app, catalog, index, trialDays }: { app: PublicApp; catalog: CatalogResponse | null; index: number; trialDays: number }) {
   const info = PRODUCT[app.appId];
   const price = fromPrice(catalog, app.appId);
   return (
@@ -78,13 +78,20 @@ function ProductCard({ app, catalog, index }: { app: PublicApp; catalog: Catalog
         </ul>
         {info && <p className="mx-6 mb-6 rounded-xl bg-surface-2 px-4 py-3 text-xs leading-relaxed text-muted sm:mx-8">{info.audience}</p>}
         <div className="flex flex-wrap items-center gap-3 border-t border-line p-6 sm:px-8">
-          <ButtonLink href={`/pricing?app=${app.appId}`}>
-            Get {app.name} <ArrowRight className="size-4" aria-hidden />
+          <ButtonLink href="/free-month">
+            Try {app.name} free <ArrowRight className="size-4" aria-hidden />
           </ButtonLink>
           <ButtonLink href={app.url} variant="outline">
-            <Lock className="size-4" aria-hidden /> Launch (licence holders)
+            <Lock className="size-4" aria-hidden /> Launch
           </ButtonLink>
-          {price && <span className="readout ml-auto text-sm text-muted">from {price}</span>}
+          <span className="readout ml-auto text-right text-sm text-muted">
+            {trialDays} days free
+            {price && (
+              <a href={`/pricing?app=${app.appId}`} className="block text-xs text-subtle hover:text-accent-ink">
+                then from {price}
+              </a>
+            )}
+          </span>
         </div>
       </Card>
     </Reveal>
@@ -100,7 +107,7 @@ const PILLARS = [
   {
     Icon: Fingerprint,
     title: "One secure sign-in",
-    body: "Sign in once at altvivo.bio and open every licensed app. Two-factor authentication for administrators; instant sign-out everywhere.",
+    body: "Sign in once at altvivo.bio and open every app you have access to. Two-factor authentication for administrators; instant sign-out everywhere.",
   },
   {
     Icon: ScrollText,
@@ -109,15 +116,14 @@ const PILLARS = [
   },
   {
     Icon: FileText,
-    title: "Procurement-ready billing",
-    body: "GST tax invoices, proforma quotations for purchase orders, and NEFT / RTGS payment for institutions, in INR or USD.",
+    title: "Simple, GST-ready billing",
+    body: "Clear yearly prices in Indian rupees, a GST tax invoice for every payment, and payment by UPI, cards or NetBanking.",
   },
 ];
 
 export default async function HomePage() {
-  const country = (await headers()).get("cf-ipcountry")?.toUpperCase();
-  const currency = country === "IN" ? "INR" : "USD";
-  const [apps, catalog, board] = await Promise.all([getPublicApps(), getCatalog(currency), getAdvisoryBoard(true)]);
+  const currency = "INR" as const;
+  const [apps, catalog, offer] = await Promise.all([getPublicApps(), getCatalog(currency), getTrialOffer()]);
   const live = apps.filter(isAvailable);
 
   return (
@@ -136,21 +142,25 @@ export default async function HomePage() {
             </h1>
             <p className="mt-5 font-serif text-xl italic text-fg/80 sm:text-2xl">From molecular discovery to translational validation.</p>
             <p className="mt-5 max-w-xl text-lg leading-relaxed text-muted text-pretty">
-              The unified digital infrastructure for life sciences, preclinical discovery and scientific education. Computational engines, virtual
-              physiological labs, computer-vision analytics, biostatistics and regulatory intelligence, all behind one AltVivo account.
+              One platform for preclinical education, training and in-silico research. Every tool sits in one place, so students and researchers can
+              work with confidence and keep building their skills.
             </p>
             <div className="mt-9 flex flex-wrap gap-3">
-              <ButtonLink href="/pricing" size="lg">
+              <ButtonLink href="/free-month" size="lg">
+                <Gift className="size-4" aria-hidden /> Start {trialLength(offer.days)} free
+              </ButtonLink>
+              <ButtonLink href="/pricing" size="lg" variant="outline">
                 View plans <ArrowRight className="size-4" aria-hidden />
               </ButtonLink>
-              <ButtonLink href="/pricing#institutional" size="lg" variant="outline">
-                <Building2 className="size-4" aria-hidden /> Institutional licence
-              </ButtonLink>
             </div>
-            <dl className="mt-12 grid max-w-sm grid-cols-2 divide-x divide-line border-y border-line">
+            <p className="mt-4 text-sm text-subtle">
+              {offer.days} days of full access. No card needed, nothing charged when it ends.
+            </p>
+            <dl className="mt-10 grid max-w-lg grid-cols-3 divide-x divide-line border-y border-line">
               {[
                 ["40+", "CAL in-vivo simulations"],
                 [String(live.length), "applications live"],
+                [String(offer.days), "days free to start"],
               ].map(([v, k]) => (
                 <div key={k} className="px-4 py-4 first:pl-0">
                   <dt className="sr-only">{k}</dt>
@@ -161,14 +171,14 @@ export default async function HomePage() {
             </dl>
           </Reveal>
           <Reveal delay={0.15}>
-            <HeroReadout />
+            <HeroVideos fallback={<HeroReadout />} />
           </Reveal>
         </div>
         {/* Standards strip: what the platform is designed around. */}
         <div className="relative border-t border-line bg-surface/70 backdrop-blur">
           <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-x-10 gap-y-3 px-4 py-5 sm:px-6 lg:justify-between">
             <span className="readout text-[11px] uppercase tracking-[0.16em] text-subtle">Designed around</span>
-            {["The 3Rs: Replace · Reduce · Refine", "CCSEA guidance", "PCI & NMC practical curricula", "GLP-style audit trails"].map((t) => (
+            {["The 3Rs: Replace · Reduce · Refine", "Preclinical research", "Pharmacology and toxicology"].map((t) => (
               <span key={t} className="flex items-center gap-2 font-serif text-[1.05rem] text-muted">
                 <BadgeCheck className="size-4 text-accent-ink" aria-hidden strokeWidth={1.75} />
                 {t}
@@ -180,13 +190,40 @@ export default async function HomePage() {
 
       {/* ---------------------------------------------------- live products */}
       <section id="apps" className="mx-auto max-w-7xl scroll-mt-20 px-4 py-20 sm:px-6">
-        <SectionHeading eyebrow="Flagship products" title="Two live applications, one AltVivo licence">
-          Buy one app, or both together in the Dual-Suite bundle. Access is checked on every visit, so licences activate the moment payment completes.
+        <SectionHeading eyebrow="Flagship products" title="Two applications, one AltVivo sign-in">
+          Try both free for {trialLength(offer.days)}. Afterwards subscribe to the one you need: XPRISM for a class of up to 100 students, aMaze by the
+          year or per video. A subscription activates the moment payment completes.
         </SectionHeading>
         <div className="mt-10 grid gap-6 lg:grid-cols-2">
           {live.map((a, i) => (
-            <ProductCard key={a.appId} app={a} catalog={catalog} index={i} />
+            <ProductCard key={a.appId} app={a} catalog={catalog} index={i} trialDays={offer.days} />
           ))}
+        </div>
+      </section>
+
+      {/* ------------------------------------------------------- free month */}
+      <section id="free-month" className="scroll-mt-20 px-4 pb-20 sm:px-6">
+        <div className="glow mx-auto grid max-w-7xl gap-10 rounded-3xl border border-line bg-surface p-8 sm:p-12 lg:grid-cols-[1fr_1.1fr] lg:items-center">
+          <div>
+            <div className="brand-gradient grid size-14 place-items-center rounded-2xl text-white">
+              <Gift className="size-7" aria-hidden />
+            </div>
+            <p className="eyebrow mt-6">{offer.days} days · no card</p>
+            <h2 className="mt-3 text-3xl sm:text-4xl">Your first month is on us</h2>
+            <p className="mt-3 max-w-xl leading-relaxed text-muted">
+              Run the organ bath with your own batch, or score your own maze videos, before anyone raises a purchase order. The free month is the full
+              product: nothing is hidden, and your reports and exports stay in your account.
+            </p>
+            <div className="mt-7 flex flex-wrap gap-3">
+              <ButtonLink href="/free-month" size="lg">
+                Request your free month <ArrowRight className="size-4" aria-hidden />
+              </ButtonLink>
+              <ButtonLink href="/pricing" size="lg" variant="outline">
+                See what it costs afterwards
+              </ButtonLink>
+            </div>
+          </div>
+          <TrialSteps days={offer.days} />
         </div>
       </section>
 
@@ -208,64 +245,6 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* --------------------------------------------------- advisory board */}
-      {board.length > 0 && (
-        <section id="advisory" className="scroll-mt-20 border-y border-line bg-surface/70 backdrop-blur-sm">
-          <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6">
-            <div className="flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
-              <SectionHeading eyebrow="Scientific Advisory Board" title="Guided by practising scientists">
-                Pharmacologists, toxicologists, animal-ethics committee members and academic leaders who advise how AltVivo is designed and validated.
-              </SectionHeading>
-              <ButtonLink href="/advisory-board" variant="outline">
-                <Users className="size-4" aria-hidden /> Meet the board
-              </ButtonLink>
-            </div>
-            <div className="mt-10 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {board.slice(0, 6).map((m) => (
-                <MemberCard key={m.slug} member={m} compact />
-              ))}
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ----------------------------------------------------- institutions */}
-      <section id="institutions" className="scroll-mt-20 px-4 py-20 sm:px-6">
-        <div className="glow mx-auto grid max-w-7xl gap-10 rounded-3xl border border-line bg-surface p-8 sm:p-12 lg:grid-cols-[1.2fr_1fr] lg:items-center">
-          <div>
-            <div className="brand-gradient grid size-14 place-items-center rounded-2xl text-white">
-              <Building2 className="size-7" aria-hidden />
-            </div>
-            <h2 className="mt-6 text-3xl sm:text-4xl">Colleges, universities and research institutes</h2>
-            <p className="mt-3 max-w-2xl leading-relaxed text-muted">
-              A site licence covers XPRISM and aMaze for a department or the whole campus. Members join automatically with an institutional email address,
-              your administrator manages seats, and procurement receives a GST proforma invoice to raise the purchase order.
-            </p>
-            <div className="mt-7 flex flex-wrap gap-3">
-              <ButtonLink href="/pricing#institutional">
-                Price a site licence <ArrowRight className="size-4" aria-hidden />
-              </ButtonLink>
-              <ButtonLink href="/contact?topic=institutional" variant="outline">
-                Talk to our team
-              </ButtonLink>
-            </div>
-          </div>
-          <ul className="grid gap-3 text-sm">
-            {[
-              "Email-domain whitelisting: students and staff join with their institutional address",
-              "Administrator seat management and member list",
-              "Downloadable PDF proforma invoice for academic procurement",
-              "Payment by NEFT / RTGS / cheque against a purchase order",
-              "GST tax invoice on payment, with your institution's GSTIN",
-            ].map((t) => (
-              <li key={t} className="flex items-start gap-3 rounded-xl border border-line bg-bg px-4 py-3">
-                <ShieldCheck className="mt-0.5 size-4 shrink-0 text-live-ink" aria-hidden />
-                <span>{t}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </section>
     </>
   );
 }

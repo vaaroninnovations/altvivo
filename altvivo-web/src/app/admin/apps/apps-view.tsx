@@ -158,7 +158,7 @@ export function AppsView() {
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-subtle">Plans & prices</h2>
       <LoadState loading={plans.loading && !plans.data} error={plans.error} onRetry={plans.reload} />
       {plans.data && (
-        <Table head={["Plan", "Apps", "INR", "USD", "Seats", "Subscriptions", "Visibility", ""]} empty={!plans.data.plans.length} minWidth={980}>
+        <Table head={["Plan", "Apps", "Price (₹)", "Seats", "Subscriptions", "Visibility", ""]} empty={!plans.data.plans.length} minWidth={980}>
           {plans.data.plans.map((p) => (
             <tr key={p.planCode} className={p.active ? "" : "opacity-60"}>
               <td>
@@ -170,7 +170,6 @@ export function AppsView() {
               </td>
               <td className="readout text-xs">{p.apps.join(" + ")}</td>
               <td className="readout whitespace-nowrap">{formatMoney(p.priceInrPaise, "INR")}</td>
-              <td className="readout whitespace-nowrap">{formatMoney(p.priceUsdCents, "USD")}</td>
               <td className="readout text-xs">
                 {p.minSeats}
                 {p.maxSeats === null ? "+" : p.maxSeats === p.minSeats ? "" : `–${p.maxSeats}`}
@@ -230,7 +229,6 @@ function PlanDialog({ plan, onClose, onSaved }: { plan: AdminPlan; onClose: () =
       name: f.name.trim(),
       description: f.description.trim(),
       priceInrPaise: Math.round(Number(f.inr) * 100),
-      priceUsdCents: Math.round(Number(f.usd) * 100),
       minSeats: Number(f.minSeats),
       maxSeats: f.maxSeats.trim() ? Number(f.maxSeats) : null,
       monthlyCredits: Number(f.monthlyCredits),
@@ -239,7 +237,6 @@ function PlanDialog({ plan, onClose, onSaved }: { plan: AdminPlan; onClose: () =
         .map((s) => s.trim())
         .filter(Boolean),
       sortOrder: Number(f.sortOrder),
-      stripePriceId: f.stripePriceId.trim() || null,
       highlighted: f.highlighted,
       active: f.active,
       isPublic: f.isPublic,
@@ -248,7 +245,7 @@ function PlanDialog({ plan, onClose, onSaved }: { plan: AdminPlan; onClose: () =
     return Object.fromEntries(Object.entries(next).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(before[k])));
   }
   const diff = changes();
-  const priceChange = "priceInrPaise" in diff || "priceUsdCents" in diff;
+  const priceChange = "priceInrPaise" in diff;
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -272,13 +269,13 @@ function PlanDialog({ plan, onClose, onSaved }: { plan: AdminPlan; onClose: () =
   }
 
   const money = (v: string) => /^\d+(\.\d{1,2})?$/.test(v.trim());
-  const valid = f.name.trim().length >= 2 && money(f.inr) && money(f.usd) && Number(f.minSeats) >= 1 && (!f.maxSeats.trim() || Number(f.maxSeats) >= Number(f.minSeats)) && (!f.stripePriceId.trim() || /^price_[A-Za-z0-9]{6,64}$/.test(f.stripePriceId.trim()));
+  const valid = f.name.trim().length >= 2 && money(f.inr) && Number(f.minSeats) >= 1 && (!f.maxSeats.trim() || Number(f.maxSeats) >= Number(f.minSeats)) && (!f.stripePriceId.trim() || /^price_[A-Za-z0-9]{6,64}$/.test(f.stripePriceId.trim()));
 
   return (
     <Dialog open onClose={onClose} title={`Edit ${plan.name}`} wide>
       <form onSubmit={submit} className="space-y-4">
         {plan.subscriptions > 0 && priceChange && (
-          <Alert tone="warning">{plan.subscriptions} subscriptions use this plan. New prices apply from their next renewal; recurring Stripe subscriptions keep their linked Stripe price until you change it there.</Alert>
+          <Alert tone="warning">{plan.subscriptions} subscriptions use this plan. New prices apply from their next renewal; recurring subscriptions keep their linked Stripe price until you change it there.</Alert>
         )}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Display name" id="p-name">
@@ -295,9 +292,6 @@ function PlanDialog({ plan, onClose, onSaved }: { plan: AdminPlan; onClose: () =
           <Field label={`Price INR (₹, before GST${plan.pricingModel === "PER_SEAT" ? ", per seat" : ""})`} id="p-inr">
             <input id="p-inr" className="field readout" inputMode="decimal" value={f.inr} onChange={set("inr")} />
           </Field>
-          <Field label={`Price USD ($${plan.pricingModel === "PER_SEAT" ? ", per seat" : ""})`} id="p-usd">
-            <input id="p-usd" className="field readout" inputMode="decimal" value={f.usd} onChange={set("usd")} />
-          </Field>
           <Field label="Minimum seats" id="p-min">
             <input id="p-min" type="number" min={1} className="field readout" value={f.minSeats} onChange={set("minSeats")} />
           </Field>
@@ -306,9 +300,6 @@ function PlanDialog({ plan, onClose, onSaved }: { plan: AdminPlan; onClose: () =
           </Field>
           <Field label="Monthly compute credits" id="p-cred">
             <input id="p-cred" type="number" min={0} className="field readout" value={f.monthlyCredits} onChange={set("monthlyCredits")} />
-          </Field>
-          <Field label="Stripe price ID" id="p-stripe" hint="Required for recurring USD billing">
-            <input id="p-stripe" className="field readout" placeholder="price_…" value={f.stripePriceId} onChange={set("stripePriceId")} />
           </Field>
           <div className="sm:col-span-2">
             <Field label="Features (one per line, max 12)" id="p-feat">

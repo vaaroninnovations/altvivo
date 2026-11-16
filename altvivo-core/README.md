@@ -12,7 +12,7 @@ npm test
 
 ## Access model
 
-No free tier, no trials. A user may open XPRISM or aMaze only while a **paid grant** is in force:
+One month free, then paid. A person can request one month of free access (`POST /v1/public/trial-request`); a SUPERADMIN approves it at `/admin/trials` (`/v1/api/admin/trials*`, TOTP-signed) and the free month starts once the address has a verified account (claims report it as `source: "trial"`, tier `TRIAL`). There is no permanent free tier. Contact enquiries, free-month requests and forwarded replies (`POST /v1/webhooks/mail/inbound`, `MAIL_INBOUND_TOKEN`) land in the SuperAdmin mailbox (`/v1/api/admin/mail*`). Otherwise a user may open XPRISM or aMaze only while a **paid grant** is in force:
 - an individual single-app plan or the Dual-Suite bundle;
 - their institution's site licence;
 - a manual licence a SUPERADMIN recorded for an offline payment.

@@ -406,6 +406,14 @@ services:
       SELLER_TRADE_NAME: ${SELLER_TRADE_NAME:-AltVivo}
       SELLER_GSTIN: ${SELLER_GSTIN:-}
       SUPPORT_EMAIL: ${SUPPORT_EMAIL:-support@altvivo.bio}
+      # About page: the founder section (empty = generic wording).
+      LEGAL_FOUNDER_NAME: ${LEGAL_FOUNDER_NAME:-}
+      LEGAL_FOUNDER_ROLE: ${LEGAL_FOUNDER_ROLE:-}
+      LEGAL_FOUNDER_BIO: ${LEGAL_FOUNDER_BIO:-}
+      # Search-engine ownership tags and Google Analytics 4 (all optional).
+      GOOGLE_SITE_VERIFICATION: ${GOOGLE_SITE_VERIFICATION:-}
+      BING_SITE_VERIFICATION: ${BING_SITE_VERIFICATION:-}
+      GA_MEASUREMENT_ID: ${GA_MEASUREMENT_ID:-}
     tmpfs:
       - /tmp:size=64m,mode=1777
       - /app/.next/cache:size=256m,mode=1777

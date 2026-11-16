@@ -32,10 +32,10 @@ Module 1 wires Caddy, XPRISM, aMaze and the top bar against the interfaces below
   - `active` is `true` only for a paid grant that is in force: an individual subscription, a dual-suite bundle, an institutional seat, or a manual grant by a SUPERADMIN.
   - `expires_at` is epoch seconds, or `null` for open-ended grants.
   - Spokes refuse when `active !== true` or `expires_at <= now`.
-- **No free tier.** Trials, waitlists and default access never set `active: true`.
+- **No permanent free tier.** Waitlists and default access never set `active: true`. The only free access is the one-month free grant a SUPERADMIN approves (`source: "trial"`, always with `expires_at`).
 - **Roles.** `role` is one of `STUDENT | RESEARCHER | PI | INSTITUTE_ADMIN | ADVISORY_BOARD | SUPERADMIN`. `SUPERADMIN` and `ADVISORY_BOARD` bypass billing (env `PAID_GATE_VIP_ROLES` on core, `ALTVIVO_VIP_ROLES` on spokes).
 - **XPRISM admin.** XPRISM grants its platform-admin role only to `SUPERADMIN` with `mfa: true`.
-- **Tier.** `tier` is `NONE | INDIVIDUAL | BUNDLE | INSTITUTIONAL | VIP` (the best grant held); `source` is `individual | bundle | institution | manual | vip`.
+- **Tier.** `tier` is `NONE | TRIAL | INDIVIDUAL | BUNDLE | INSTITUTIONAL | VIP` (the best grant held); `source` is `trial | payg | individual | bundle | institution | manual | vip`. `payg` is pay per use: the app is open while the person has prepaid analyses left (`credits_remaining > 0`), `expires_at` is null, and a subscription, licence or free month always takes precedence over it. `trial` is the one-month free access a SUPERADMIN approved (`POST /v1/public/trial-request`, `/admin/trials`): a normal time-boxed grant with `expires_at`, treated by spokes exactly like a paid one.
 - **Freshness.** `iat_ms` is the mint time in milliseconds. After any access change, core marks the user's tokens stale (Redis `core:stale:user:<sub>`, epoch ms); the gate then answers like an expired token so the browser refreshes. Spokes may ignore this: the gate runs first.
 
 The session endpoints (`GET /v1/auth/session`, `POST /v1/auth/refresh`) return `user.entitlements` in the same shape, camel-cased (`active`, `level`, `plan`, `expiresAt` as ISO-8601). `<altvivo-topbar>` and aMaze read that shape.
@@ -48,7 +48,7 @@ It must answer from the JWT and the Redis revocation list only (no database quer
 
 | Situation | Navigation request (GET/HEAD, `Accept: text/html`) | API / XHR / other |
 |---|---|---|
-| Valid token, `active` (or VIP role), app `LIVE`/`BETA` | `200`, empty body, with headers `X-AltVivo-User-Id`, `X-AltVivo-Email`, `X-AltVivo-Role`, `X-AltVivo-Access` (`paid` \| `vip`), `X-AltVivo-Plan` | same |
+| Valid token, `active` (or VIP role), app `LIVE`/`BETA` | `200`, empty body, with headers `X-AltVivo-User-Id`, `X-AltVivo-Email`, `X-AltVivo-Role`, `X-AltVivo-Access` (`paid` \| `trial` \| `vip`), `X-AltVivo-Plan` | same |
 | No / invalid / revoked token | `302 https://altvivo.bio/login?redirect=<original URL>` | `401 {"error":"unauthenticated","redirect":…}` |
 | Token expired | `302 https://api.altvivo.bio/v1/auth/refresh/bounce?next=<original URL>` | `401 {"error":"session_expired","refreshUrl":…}` |
 | Signed in, not paid / expired grant | `302 https://altvivo.bio/workspace/upgrade?app=<id>&reason=subscription_required` (or `subscription_expired`) | `403 {"error":"subscription_required","redirect":…}` |
@@ -107,3 +107,23 @@ Every endpoint above is implemented in altvivo-core and covered by its test suit
   - `/v1/api/billing/profile`, `checkout` and `razorpay/confirm`;
   - `invoices`, `subscriptions` and `quotes`.
 - `/admin`: `/v1/api/admin/*`.
+
+## Pay per use (aMaze)
+
+An app with `requires_credits` is also sold per use: one credit = one animal / video tracked and analysed (`PAY_PER_USE_PRICE_PAISE`, default Rs 20 + GST). People buy analyses at `/pricing` or `/workspace` (`POST /v1/api/billing/usage/checkout`, paid through Razorpay on a GST tax invoice).
+
+**The spoke must report every completed analysis**, server to server, with its service token:
+
+```
+POST /v1/internal/usage      Authorization: Bearer <service token>
+{ "userId": "<uuid>", "referenceId": "<the spoke's own id of this analysis>", "units": 1 }
+```
+
+| Answer | Meaning |
+|---|---|
+| `200 { charged: false, mode: "individual" \| "trial" \| "manual" \| "institution" \| "vip" }` | The person holds a subscription, licence or free month: nothing is charged. |
+| `200 { charged: true, mode: "payg", units, balance }` | One credit per unit was taken; `balance` is what is left. |
+| `200 { charged: false, mode: "payg", duplicate: true }` | This `referenceId` was already charged (safe to retry). |
+| `402 INSUFFICIENT_CREDITS` (`details.buyUrl`) | No analyses left: do not release the result; send the person to `buyUrl`. |
+
+Call it before releasing the result of an analysis. The gate (`/v1/auth/verify`) answers `X-AltVivo-Plan: payg` for pay-per-use visitors, so the spoke can show the remaining balance (`GET /v1/internal/users/:id/entitlements` -> `creditsRemaining`).

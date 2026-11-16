@@ -9,6 +9,7 @@ Next.js 16 (App Router, React 19, Tailwind 4), served by `altvivo-web:3000` behi
 | `/` | Hero, the flagship products (XPRISM, aMaze) with live "from" prices, platform pillars, the Phase 2 pipeline with early-access waitlists, the featured Scientific Advisory Board, institutions | `GET /v1/public/apps`, `plans`, `advisory-board?featured=1` |
 | `/advisory-board` | Published advisory board: portrait, credentials, designation, affiliation, specialisations, ORCID / Scholar / LinkedIn / website, bio dialog | `GET /v1/public/advisory-board` (managed in `/admin`) |
 | `/pricing` | Currency switch (INR via Razorpay, USD via Stripe), monthly / annual, single-app and Dual-Suite cards, site-licence seat calculator with GST, proforma PDF for institution admins or a quotation request, comparison, FAQ | `GET /v1/public/plans`; checkout below |
+| `/free-month` | "One month free" request form (name, institution, role, applications, use case); a signed-in visitor sees where their own request stands. The site-wide announcement bar (`components/trial.tsx`) links here | `GET /v1/public/trial-offer`, `POST /v1/public/trial-request` |
 | `/privacy`, `/terms`, `/cookies` | Privacy Policy (DPDPA 2023 + GDPR, Grievance Officer), Terms & Conditions (licences, seats, no sharing, research disclaimers, IP, GST, refunds `#refunds`, Indian jurisdiction), Cookie Policy (every cookie and storage key) | legal identity from `LEGAL_*` / `SELLER_*` env, read per request |
 | `/contact` | Contact form (`?topic=institutional` etc.) | `POST /v1/public/contact` |
 | `/coming-soon?app=` | Phase 2 holding page and maintenance page (Caddy routes Phase 2 hosts here) | registry |
@@ -24,6 +25,8 @@ Next.js 16 (App Router, React 19, Tailwind 4), served by `altvivo-web:3000` behi
 | `/admin/invoices`, `/admin/payments` | Every tax invoice, proforma and credit note (PDF, record payment, credit note, cancel); every Razorpay / Stripe / bank payment | `/v1/api/admin/invoices*`, `payments` |
 | `/admin/apps` | App switchboard (LIVE / BETA / MAINTENANCE / COMING_SOON, version, notify waitlist) and plan price editor | `/v1/api/admin/apps*`, `plans*` |
 | `/admin/advisory` | Advisory board CMS: create, edit, publish / hide, feature, reorder, delete, portrait upload (SHA-256 presigned PUT) | `/v1/api/admin/advisory-board*` |
+| `/admin/mail` | SuperAdmin mailbox: Inbox (contact enquiries, free-month requests, forwarded replies), Starred, Sent, Drafts, Trash; conversation view, compose / reply / forward, save draft, search, unread filter, bulk read / star / trash / restore / delete, empty trash | `/v1/api/admin/mail*` |
+| `/admin/trials` | Free-month requests: approve (TOTP-signed, 1 to 90 days) or decline; shows whether the address already has a verified account | `/v1/api/admin/trials*` |
 | `/admin/contact`, `/admin/audit` | Contact inbox with status workflow; filterable hash-chained audit trail with chain verification | `/v1/api/admin/contact*`, `audit*` |
 
 Every privileged admin change opens the e-signature dialog (`components/admin/kit.tsx`): a fresh authenticator code (single use) and a reason, both stored in the audit trail by core.
@@ -52,6 +55,8 @@ Institution administrators can generate a numbered proforma PDF with `POST /v1/a
 Build-time (`NEXT_PUBLIC_*`, Docker build args): `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_EMBED_URL`, `NEXT_PUBLIC_TURNSTILE_SITE_KEY`.
 
 Runtime:
+- **Search engines and analytics (all optional, read per request):** `GOOGLE_SITE_VERIFICATION` and `BING_SITE_VERIFICATION` print the ownership meta tags in `<head>` (`src/app/layout.tsx`); `GA_MEASUREMENT_ID` (`G-XXXXXXXXXX`) turns on Google Analytics 4 (`components/analytics.tsx`), which loads only after the visitor allows Analytics cookies, never on signed-in pages, and is added to the CSP only when set. `/robots.txt` and `/sitemap.xml` come from `src/app/robots.ts` and `src/app/sitemap.ts`.
+- **About page founder:** `LEGAL_FOUNDER_NAME`, `LEGAL_FOUNDER_ROLE`, `LEGAL_FOUNDER_BIO`.
 - **Core API:** `CORE_INTERNAL_URL`, `JWKS_INTERNAL_URL`, `JWT_ISSUER`.
 - **Legal identity:**
   - `LEGAL_ENTITY_NAME`, `LEGAL_REGISTERED_ADDRESS`, `LEGAL_CIN`, `SELLER_TRADE_NAME`, `SELLER_GSTIN`;

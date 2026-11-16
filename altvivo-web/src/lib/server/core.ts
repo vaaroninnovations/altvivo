@@ -1,6 +1,7 @@
 import "server-only";
 import { FALLBACK_APPS } from "../catalog";
-import type { AdvisoryMember, CatalogResponse, PublicApp } from "../types";
+import { DEFAULT_TRIAL_DAYS } from "../trial";
+import type { AdvisoryMember, CatalogResponse, PublicApp, TrialOffer } from "../types";
 
 const CORE = (process.env.CORE_INTERNAL_URL ?? "http://altvivo-core:4000").replace(/\/$/, "");
 
@@ -47,7 +48,7 @@ export async function getPublicApps(): Promise<PublicApp[]> {
 }
 
 /** Public price list; null when core is unreachable (pages show a retry notice, never invented prices). */
-export async function getCatalog(currency: "INR" | "USD"): Promise<CatalogResponse | null> {
+export async function getCatalog(currency: "INR" = "INR"): Promise<CatalogResponse | null> {
   try {
     const c = await coreGet<CatalogResponse>(`/v1/public/plans?currency=${currency}`, { revalidate: 60 });
     // A cached response from an older API version has no kind / prices: treat it as unavailable, never render it.
@@ -66,4 +67,15 @@ export async function getAdvisoryBoard(featuredOnly = false): Promise<AdvisoryMe
   } catch {
     return [];
   }
+}
+
+/** The "one month free" offer; falls back to the standard month and the built-in catalogue if core is unreachable. */
+export async function getTrialOffer(): Promise<TrialOffer> {
+  try {
+    const o = await coreGet<TrialOffer>("/v1/public/trial-offer", { revalidate: 60 });
+    if (Number.isFinite(o.days) && Array.isArray(o.apps)) return o;
+  } catch {
+    /* fall through */
+  }
+  return { days: DEFAULT_TRIAL_DAYS, apps: FALLBACK_APPS.filter((a) => a.status === "LIVE" || a.status === "BETA").map((a) => ({ appId: a.appId, name: a.name })) };
 }

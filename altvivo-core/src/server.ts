@@ -5,6 +5,7 @@ import type { Deps } from './deps.js';
 import { HttpError } from './lib/errors.js';
 import { registerSecurityHooks } from './plugins/security.js';
 import adminAccountRoutes from './routes/admin-accounts.js';
+import adminMailRoutes from './routes/admin-mail.js';
 import adminRoutes from './routes/admin.js';
 import authRoutes from './routes/auth.js';
 import billingRoutes from './routes/billing.js';
@@ -90,6 +91,7 @@ export async function buildApp(d: Deps, opts: { logger?: boolean } = {}): Promis
   await app.register(async (s) => meRoutes(s, d));
   await app.register(async (s) => adminRoutes(s, d));
   await app.register(async (s) => adminAccountRoutes(s, d));
+  await app.register(async (s) => adminMailRoutes(s, d));
   await app.register(async (s) => billingRoutes(s, d));
   await app.register(async (s) => internalRoutes(s, d));
 

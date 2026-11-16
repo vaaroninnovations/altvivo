@@ -152,9 +152,7 @@ export function BillingProfileForm({
         )}
       </div>
       <p className="text-xs text-subtle">
-        {india
-          ? "Indian addresses are billed in INR with GST (CGST + SGST in the seller's state, IGST elsewhere)."
-          : "Addresses outside India are billed in USD as a zero-rated export of services."}
+        Billed in Indian rupees with GST (CGST + SGST in the seller's state, IGST elsewhere). Buying from outside India? Write to sales@altvivo.bio.
       </p>
       <Button type="submit" loading={busy} className="w-full">
         {submitLabel}
@@ -228,13 +226,14 @@ const errorText = (err: unknown): string => {
 
 /**
  * Buy a plan: billing details -> GST total from the server -> Razorpay
- * (INR: UPI, cards, NetBanking) or Stripe (USD) -> licence active.
+ * (INR: UPI, cards, NetBanking) -> licence active.
  */
 export function CheckoutDialog({
   open,
   onClose,
   plan,
   seats = 1,
+  usage,
   viewer,
   apps,
   returnPath,
@@ -246,6 +245,8 @@ export function CheckoutDialog({
   onActivated?: () => void;
   plan: CatalogPlan;
   seats?: number;
+  /** Pay per use: buy `quantity` analyses for an app instead of a plan (plan carries the unit price, seats the quantity). */
+  usage?: { appId: string; quantity: number };
   viewer: Viewer;
   apps: Pick<PublicApp, "appId" | "name" | "url">[];
   returnPath: string;
@@ -275,7 +276,7 @@ export function CheckoutDialog({
       });
   }, [open, viewer.signedIn, viewer.emailVerified, viewer.hasOrg, viewer.role, site, scope]);
 
-  const currency: Currency = profile ? (profile.country === "IN" ? "INR" : "USD") : "INR";
+  const currency: Currency = "INR";
   const quote = useMemo(() => gstEstimate(planPrice(plan, currency, seats), plan.gstRateBp, currency), [plan, currency, seats]);
   const unlocked = apps.filter((a) => plan.apps.includes(a.appId));
 
@@ -283,7 +284,9 @@ export function CheckoutDialog({
     setStep("paying");
     setError(null);
     try {
-      const r = await api<CheckoutResponse>("/v1/api/billing/checkout", { method: "POST", body: { planCode: plan.planCode, ...(site ? { seats } : {}) } });
+      const r = usage
+        ? await api<CheckoutResponse>("/v1/api/billing/usage/checkout", { method: "POST", body: usage })
+        : await api<CheckoutResponse>("/v1/api/billing/checkout", { method: "POST", body: { planCode: plan.planCode, ...(site ? { seats } : {}) } });
       if (r.provider === "STRIPE") {
         window.location.assign(r.checkoutUrl);
         return;
@@ -330,7 +333,7 @@ export function CheckoutDialog({
     }
   }
 
-  const title = step === "done" ? "Licence active" : `${plan.name}${site ? ` · ${seats} seats` : ""}`;
+  const title = usage ? (step === "done" ? "Analyses added" : `${plan.name} · ${usage.quantity} ${usage.quantity === 1 ? "analysis" : "analyses"}`) : step === "done" ? "Licence active" : `${plan.name}${site ? ` · ${seats} seats` : ""}`;
 
   return (
     <Dialog open={open} onClose={onClose} title={title} wide>
@@ -388,10 +391,14 @@ export function CheckoutDialog({
         <div className="space-y-5">
           <dl className="divide-y divide-line rounded-xl border border-line">
             <div className="flex justify-between gap-4 px-4 py-3 text-sm">
-              <dt className="text-muted">Licence</dt>
+              <dt className="text-muted">{usage ? "Purchase" : "Licence"}</dt>
               <dd className="text-right font-medium">
                 {plan.name}
-                <span className="block text-xs text-subtle">{unlocked.map((a) => a.name).join(" + ")} · {plan.interval === "YEAR" ? "12 months" : "1 month"}, prepaid{plan.renews === "automatically" && currency === "USD" ? ", renews automatically" : ""}</span>
+                <span className="block text-xs text-subtle">
+                  {usage
+                    ? `${usage.quantity} × ${formatMoney(plan.prices[currency], currency)} · one animal / video each`
+                    : `${unlocked.map((a) => a.name).join(" + ")} · ${plan.interval === "YEAR" ? "12 months" : "1 month"}, prepaid`}
+                </span>
               </dd>
             </div>
             {site && (
@@ -425,11 +432,11 @@ export function CheckoutDialog({
             </button>
           </div>
           <Button size="lg" className="w-full" onClick={pay} loading={step === "paying"}>
-            {currency === "INR" ? <CreditCard className="size-4" aria-hidden /> : <Lock className="size-4" aria-hidden />}
-            {currency === "INR" ? `Pay ${formatMoney(quote.totalMinor, currency)} · UPI, cards, NetBanking` : `Continue to secure payment (Stripe)`}
+            <CreditCard className="size-4" aria-hidden />
+            {`Pay ${formatMoney(quote.totalMinor, currency)} · UPI, cards, NetBanking`}
           </Button>
           <p className="text-center text-xs text-subtle">
-            {currency === "INR" ? "Payments are processed by Razorpay." : "You will be redirected to Stripe Checkout."} A GST invoice is emailed as soon as the payment
+            Payments are processed by Razorpay. A GST invoice is emailed as soon as the payment
             completes. By paying you accept the <a href="/terms" className="underline">Terms</a> and the{" "}
             <a href="/terms#refunds" className="underline">refund policy</a>.
           </p>
@@ -441,7 +448,10 @@ export function CheckoutDialog({
           <div className="flex items-start gap-3 rounded-xl border border-live/30 bg-live-soft p-4">
             <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-live-ink" aria-hidden />
             <p className="text-sm">
-              Payment received. Your {plan.name} licence is active now, and your GST invoice is on its way to <strong>{profile?.email}</strong>.
+              {usage
+                ? `Payment received. ${usage.quantity} ${usage.quantity === 1 ? "analysis has" : "analyses have"} been added to your account, and your GST invoice is on its way to `
+                : `Payment received. Your ${plan.name} licence is active now, and your GST invoice is on its way to `}
+              <strong>{profile?.email}</strong>.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">

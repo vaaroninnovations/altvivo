@@ -17,7 +17,6 @@ export function formatMoney(minor: number, currency: Currency, opts: { whole?: b
 
 /** GST shown on the pricing page. Mirrors the database rounding (half-up per line). */
 export function gstEstimate(taxableMinor: number, rateBp: number, currency: Currency) {
-  // Exports (USD, customers outside India) are zero-rated under LUT.
   const tax = currency === "INR" ? Math.round((taxableMinor * rateBp) / 10_000) : 0;
   return { taxableMinor, taxMinor: tax, totalMinor: taxableMinor + tax };
 }
@@ -70,18 +69,8 @@ export const GST_STATES: { code: string; name: string }[] = [
   { code: "97", name: "Other Territory" },
 ];
 
-/** ISO 3166-1 countries offered in the billing form (India first; everything else is billed in USD). */
-export const COUNTRIES: { code: string; name: string }[] = [
-  { code: "IN", name: "India" },
-  ...[
-    ["AE", "United Arab Emirates"], ["AU", "Australia"], ["BD", "Bangladesh"], ["BR", "Brazil"], ["CA", "Canada"], ["CH", "Switzerland"],
-    ["CN", "China"], ["DE", "Germany"], ["EG", "Egypt"], ["ES", "Spain"], ["FR", "France"], ["GB", "United Kingdom"], ["ID", "Indonesia"],
-    ["IE", "Ireland"], ["IT", "Italy"], ["JP", "Japan"], ["KE", "Kenya"], ["KR", "South Korea"], ["LK", "Sri Lanka"], ["MY", "Malaysia"],
-    ["NG", "Nigeria"], ["NL", "Netherlands"], ["NP", "Nepal"], ["NZ", "New Zealand"], ["OM", "Oman"], ["PH", "Philippines"], ["PK", "Pakistan"],
-    ["QA", "Qatar"], ["SA", "Saudi Arabia"], ["SE", "Sweden"], ["SG", "Singapore"], ["TH", "Thailand"], ["TR", "Türkiye"], ["US", "United States"],
-    ["VN", "Vietnam"], ["ZA", "South Africa"],
-  ].map(([code, name]) => ({ code: code!, name: name! })),
-];
+/** Billing is in Indian rupees to addresses in India (buyers elsewhere contact sales). */
+export const COUNTRIES: { code: string; name: string }[] = [{ code: "IN", name: "India" }];
 
 export const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 

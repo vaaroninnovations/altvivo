@@ -8,6 +8,7 @@ import { affectedUsers } from '../services/access.js';
 const LOCK_KEY = 'jobs:maintenance:lock';
 const DRAFT_TTL_DAYS = 7;
 const REMINDER_DAYS = 7;
+const TRIAL_REMINDER_DAYS = 5;
 
 /**
  * Hourly housekeeping, run by whichever replica wins a Redis lock:
@@ -16,6 +17,7 @@ const REMINDER_DAYS = 7;
  *     holders' claims (access already stopped at period end via expires_at)
  *   - delete checkout DRAFT invoices abandoned for a week (no payment)
  *   - renewal reminders 7 days before a prepaid term ends (once per term)
+ *   - a reminder 5 days before a free month ends (once per request)
  * Security-relevant history stays in audit_logs.
  */
 export async function runMaintenance(d: Deps, log: FastifyBaseLogger): Promise<void> {
@@ -88,8 +90,28 @@ export async function runMaintenance(d: Deps, log: FastifyBaseLogger): Promise<v
         });
     }
 
+    // Free months about to end: one reminder, unless the person already holds a paid licence.
+    const trialsEnding = await d.prisma.trialRequest.findMany({
+      where: { status: 'ACTIVE', endsAt: { gt: now, lte: new Date(now.getTime() + TRIAL_REMINDER_DAYS * 86_400_000) }, userId: { not: null } },
+      take: 500,
+    });
+    let trialReminders = 0;
+    for (const t of trialsEnding) {
+      const paid = await d.prisma.subscription.count({ where: { userId: t.userId, status: { in: ['ACTIVE', 'PAST_DUE'] }, currentPeriodEnd: { gt: t.endsAt! } } });
+      if (paid) continue;
+      const key = `jobs:trial-reminder:${t.id}`;
+      if ((await d.redis.set(key, '1', 'EX', 30 * 86_400, 'NX')) !== 'OK') continue;
+      await d.mailer
+        .send({ to: t.email, ...templates.trialEnding(t.name, t.endsAt!.toISOString().slice(0, 10), `${d.cfg.webOrigin}/pricing`) })
+        .then(() => (trialReminders += 1))
+        .catch(async (err) => {
+          await d.redis.del(key);
+          log.warn({ err, trial: t.id }, 'free month reminder failed');
+        });
+    }
+
     log.info(
-      { refreshTokens: rt.count, authTokens: at.count, sessionsExpired: sessions.count, termsExpired: ended.length, draftsDeleted: drafts.length, reminders },
+      { trialReminders, refreshTokens: rt.count, authTokens: at.count, sessionsExpired: sessions.count, termsExpired: ended.length, draftsDeleted: drafts.length, reminders },
       'maintenance complete',
     );
   } finally {

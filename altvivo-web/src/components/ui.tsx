@@ -103,6 +103,8 @@ export function StatusBadge({ status }: { status: AppStatus }) {
 }
 
 const SOURCE_LABEL: Record<NonNullable<ApiEntitlement["source"]>, string> = {
+  trial: "Free month",
+  payg: "Pay per use",
   individual: "Licensed",
   bundle: "Dual-Suite",
   institution: "Institution",

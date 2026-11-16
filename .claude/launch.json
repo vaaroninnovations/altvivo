@@ -33,6 +33,46 @@
         "altvivo-core/scripts/dev-stack.mjs"
       ],
       "port": 4000
+    },
+    {
+      "name": "web-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "--prefix",
+        "altvivo-web",
+        "next",
+        "dev",
+        "altvivo-web",
+        "--port",
+        "3010"
+      ],
+      "port": 3010
+    },
+    {
+      "name": "promo-recorder",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-I",
+        "altvivo-web/scripts/promo-videos/server.py"
+      ],
+      "port": 8790
+    },
+    {
+      "name": "preview-core",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        ".claude/preview-core.mjs"
+      ],
+      "port": 4010
+    },
+    {
+      "name": "preview-web",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        ".claude/preview-web.mjs"
+      ],
+      "port": 3020,
+      "url": "http://127.0.0.1:3020"
     }
   ]
 }

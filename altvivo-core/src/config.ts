@@ -47,6 +47,18 @@ const EnvSchema = z.object({
   /** Lifetime of audience-scoped app tokens (POST /v1/auth/app-token). */
   APP_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(900).default(300),
 
+  /**
+   * Billing is in Indian rupees only. Set true to also bill addresses outside
+   * India in US dollars through Stripe (the code path is kept but switched off).
+   */
+  USD_BILLING_ENABLED: bool.default('false'),
+  /** Pay per use: price of one analysis (one animal / video) in paise, before GST. */
+  PAY_PER_USE_PRICE_PAISE: z.coerce.number().int().min(100).max(10_000_000).default(2000),
+  /** Length of the free access a SUPERADMIN approves from a "one month free" request. */
+  TRIAL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
+  /** Bearer token for POST /v1/webhooks/mail/inbound (replies forwarded into the SuperAdmin mailbox); empty disables it. */
+  MAIL_INBOUND_TOKEN: z.string().default('').refine((v) => v === '' || v.length >= 32, 'must be at least 32 characters'),
+
   AUTH_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(5),
   SESSION_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(60),
   API_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).default(120),

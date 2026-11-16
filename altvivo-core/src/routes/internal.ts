@@ -9,6 +9,7 @@ import { userAgent } from '../lib/net.js';
 import { parse, requireService } from '../plugins/security.js';
 import { buildEntitlements, isEntitled, loadAccess } from '../services/access.js';
 import { postLedger } from '../services/credits.js';
+import { USAGE_CHARGE } from '../services/usage.js';
 import { MFA_REQUIRED_ROLES } from '../services/sessions.js';
 import { listApps } from '../services/registry.js';
 
@@ -23,6 +24,7 @@ const referenceId = z.string().min(1).max(255).regex(/^[A-Za-z0-9:._-]+$/);
 const actionType = z.string().regex(/^[A-Z][A-Z0-9_]{1,63}$/);
 
 const DebitBody = z.object({ userId: uuid, amount: z.number().int().min(1).max(1_000_000), actionType, referenceId });
+const UsageBody = z.object({ userId: uuid, referenceId, units: z.number().int().min(1).max(100).default(1) });
 const RefundBody = z.object({ userId: uuid, amount: z.number().int().min(1).max(1_000_000), referenceId });
 const UploadBody = z.object({
   userId: uuid,
@@ -122,6 +124,40 @@ export default async function internalRoutes(app: FastifyInstance, d: Deps) {
       }),
     );
     return { ledgerEntryId: entry.id, balance: entry.balanceAfter };
+  });
+
+  /**
+   * Pay per use. The app calls this once for every analysis it completes (one
+   * animal / video), with its own id of that analysis as `referenceId`.
+   *   - holder of a subscription, licence or free month: nothing is charged
+   *   - pay-per-use customer: one credit per unit is taken (402 when none left)
+   * Safe to repeat: the same referenceId is charged once.
+   */
+  app.post('/v1/internal/usage', opts, async (req) => {
+    const body = parse(UsageBody, req.body);
+    const appId = req.service!.appId;
+    const user = await activeUser(body.userId);
+    const { entitlements } = await liveEntitlements(user.id);
+    const ent = entitlements[appId];
+    const balanceOf = async () => Number((await d.prisma.$queryRaw<{ balance: number }[]>`SELECT credit_balance_for_user(${user.id}::uuid) AS balance`)[0]?.balance ?? 0);
+    if (!isEntitled(ent)) {
+      throw new HttpError(402, 'INSUFFICIENT_CREDITS', 'No analyses left. Buy more, or subscribe for unlimited use.', { buyUrl: `${d.cfg.webOrigin}/pricing?app=${appId}` });
+    }
+    if (ent!.source !== 'payg') return { charged: false, mode: ent!.source, balance: await balanceOf() };
+    try {
+      const entry = await withAudit(d.prisma, serviceActor(req, user.id), (tx) =>
+        postLedger(tx, { userId: user.id, orgId: user.orgId, appId, actionType: USAGE_CHARGE, delta: -body.units, referenceId: `${appId}:${body.referenceId}` }),
+      );
+      // The last analysis closes the app again: refresh the person's claims.
+      if (entry.balanceAfter <= 0) await d.revocations.markClaimsStale([user.id]).catch(() => undefined);
+      return { charged: true, mode: 'payg', units: body.units, balance: entry.balanceAfter };
+    } catch (err) {
+      if (err instanceof HttpError && err.code === 'DUPLICATE_LEDGER_ENTRY') return { charged: false, mode: 'payg', duplicate: true, balance: await balanceOf() };
+      if (err instanceof HttpError && err.code === 'INSUFFICIENT_CREDITS') {
+        throw new HttpError(402, 'INSUFFICIENT_CREDITS', 'Not enough analyses left for this request.', { buyUrl: `${d.cfg.webOrigin}/pricing?app=${appId}` });
+      }
+      throw err;
+    }
   });
 
   /** Refund a failed job: positive entry referencing the original debit. */

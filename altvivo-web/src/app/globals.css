@@ -95,9 +95,9 @@
   --color-soon-soft: var(--soon-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
-  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-serif: var(--font-plex-serif), "Iowan Old Style", Georgia, "Times New Roman", serif;
-  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: var(--font-ui-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: var(--font-ui-serif), "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --font-mono: var(--font-ui-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 @layer base {

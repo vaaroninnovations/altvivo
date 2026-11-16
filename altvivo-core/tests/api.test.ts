@@ -373,7 +373,6 @@ describe('internal spoke API', () => {
   });
 
   it('debits credits atomically, refuses overdraft, refunds once', async () => {
-    await ctx.deps.prisma.appRegistry.update({ where: { appId: 'amaze' }, data: { requiresCredits: true } });
     const insufficient = await svc(AMAZE_TOKEN, 'POST', '/v1/internal/credits/debit', { userId, amount: 10, actionType: 'TRACKING_JOB', referenceId: 'job-1' });
     expect(insufficient.statusCode).toBe(402);
     await ctx.deps.prisma.$executeRaw`INSERT INTO credit_ledger (user_id, action_type, delta, reference_id) VALUES (${userId}::uuid, 'PURCHASE', 100, 'test-grant')`;
@@ -385,7 +384,6 @@ describe('internal spoke API', () => {
     expect((await svc(AMAZE_TOKEN, 'POST', '/v1/internal/credits/refund', { userId, amount: 30, referenceId: 'job-1' })).statusCode).toBe(409);
     // XPRISM is not a credit-consuming app.
     expect(json(await svc(XPRISM_TOKEN, 'POST', '/v1/internal/credits/debit', { userId, amount: 1, actionType: 'RUN', referenceId: 'r' })).error.code).toBe('CREDITS_NOT_REQUIRED');
-    await ctx.deps.prisma.appRegistry.update({ where: { appId: 'amaze' }, data: { requiresCredits: false } });
   });
 
   it('vault upload: presign, then magic-byte validation on completion', async () => {

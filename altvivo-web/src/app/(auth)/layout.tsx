@@ -1,12 +1,12 @@
 import Link from "next/link";
-import { Building2, Fingerprint, KeyRound } from "lucide-react";
+import { Fingerprint, Gift, KeyRound } from "lucide-react";
 import { AppLogo, Logo } from "@/components/brand";
 import { ThemeToggle } from "@/components/client";
 
 const POINTS = [
+  { Icon: Gift, text: "Your first month is free: full access, no card needed" },
   { Icon: KeyRound, text: "One sign-in for every AltVivo application" },
   { Icon: Fingerprint, text: "Two-factor authentication and instant sign-out everywhere" },
-  { Icon: Building2, text: "Institutional access with your college or university email" },
 ];
 
 /** Shared by sign in, sign up, MFA and password reset. */
@@ -33,7 +33,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
 
         <div className="relative mx-auto w-full max-w-lg px-12 py-16">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/brand/altvivo-wordmark-dark.png" width={1200} height={392} alt="" className="h-16 w-auto" />
+          <img src="/brand/altvivo-wordmark-dark.png" width={1200} height={232} alt="" className="h-16 w-auto" />
 
           <h2 className="mt-12 text-[2.6rem] leading-[1.08] text-white">
             One Identity.
@@ -41,7 +41,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
             <em className="italic text-[#c9b8ff]">Infinite Scientific Capabilities.</em>
           </h2>
           <p className="mt-5 max-w-md leading-relaxed text-white/70">
-            Your AltVivo account opens every application you are licensed for, from molecular discovery to translational validation.
+            Your AltVivo account opens every application you have access to, from molecular discovery to translational validation.
           </p>
 
           <ul className="mt-9 space-y-3.5">

@@ -2,6 +2,7 @@ import { createHmac } from 'node:crypto';
 import { createLocalJWKSet, jwtVerify } from 'jose';
 import { authenticator } from 'otplib';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { PLANS } from '../db/seed/seed.js';
 import { Browser, RAZORPAY_KEY_SECRET, RAZORPAY_WHSEC, STRIPE_WHSEC, createTestContext, type TestContext } from './helpers.js';
 
 let ctx: TestContext;
@@ -91,7 +92,10 @@ const BOSTON = { legalName: 'Overseas Lab LLC', email: 'ap@lab.example', address
 let admin: Awaited<ReturnType<typeof mfaUser>>;
 
 beforeAll(async () => {
-  ctx = await createTestContext();
+  // The dormant USD / Stripe path is exercised here; production runs INR only.
+  ctx = await createTestContext({ USD_BILLING_ENABLED: 'true' });
+  // The withdrawn plans (monthly, bundle, site licence) still drive the billing machinery tested here.
+  await ctx.deps.prisma.plan.updateMany({ where: { isPublic: false }, data: { isPublic: true } });
   admin = await mfaUser('root@altvivo.bio', 'SUPERADMIN');
 });
 
@@ -525,7 +529,7 @@ describe('SUPERADMIN licences, pricing, CMS and audit', () => {
     expect(plans.currency).toBe('INR');
     expect(plans.plans.find((p: { planCode: string }) => p.planCode === 'xprism_annual').amountMinor).toBe(1_399_000);
     const ev = await ctx.deps.prisma.auditLog.findFirst({ where: { eventType: 'ADMIN.PLAN_CHANGE', resourceId: 'xprism_annual' } });
-    expect(ev?.metadata).toMatchObject({ from: { priceInrPaise: 1_499_000 }, to: { priceInrPaise: 1_399_000 }, signature: { method: 'totp' } });
+    expect(ev?.metadata).toMatchObject({ from: { priceInrPaise: 2_000_000 }, to: { priceInrPaise: 1_399_000 }, signature: { method: 'totp' } });
   });
 
   it('advisory board CMS feeds the public page', async () => {
@@ -568,14 +572,22 @@ describe('SUPERADMIN licences, pricing, CMS and audit', () => {
 
 // ============================================================ public site ==
 describe('public endpoints', () => {
+  it('sells XPRISM and aMaze as separate yearly plans; the withdrawn plans are hidden by default', async () => {
+    const pub = PLANS.filter((p) => p.isPublic !== false);
+    expect(pub.map((p) => [p.planCode, p.interval, p.priceInrPaise])).toEqual([['xprism_annual', 'YEAR', 2_000_000], ['amaze_annual', 'YEAR', 1_500_000]]);
+    expect(pub[0]!.features).toContain('Up to 100 students per account');
+    expect(pub[0]!.features).toContain('Up to 4 teachers per account');
+    expect(PLANS.filter((p) => p.isPublic === false).map((p) => p.planCode)).toEqual(['xprism_monthly', 'amaze_monthly', 'suite_monthly', 'suite_annual', 'site_license_annual']);
+  });
+
   it('plans describe kinds, seats, apps and tax', async () => {
     const r = json(await ctx.app.inject({ method: 'GET', url: '/v1/public/plans?currency=USD' }));
     expect(r.provider).toBe('STRIPE');
     const codes = r.plans.map((p: { planCode: string }) => p.planCode);
-    expect(codes).toEqual(['xprism_monthly', 'xprism_annual', 'amaze_monthly', 'amaze_annual', 'suite_monthly', 'suite_annual', 'site_license_annual']);
+    expect(codes.sort()).toEqual(['amaze_annual', 'amaze_monthly', 'site_license_annual', 'suite_annual', 'suite_monthly', 'xprism_annual', 'xprism_monthly']);
     const site = r.plans.find((p: { planCode: string }) => p.planCode === 'site_license_annual');
     expect(site).toMatchObject({ kind: 'SITE_LICENSE', pricingModel: 'PER_SEAT', minSeats: 25, apps: ['amaze', 'xprism'], amountMinor: 6000, quoteAvailable: true });
-    expect(r.plans.find((p: { planCode: string }) => p.planCode === 'suite_annual')).toMatchObject({ kind: 'BUNDLE', highlighted: true });
+    expect(r.plans.find((p: { planCode: string }) => p.planCode === 'suite_annual')).toMatchObject({ kind: 'BUNDLE' });
   });
 
   it('contact form: aMaze labels, honeypot, validation', async () => {

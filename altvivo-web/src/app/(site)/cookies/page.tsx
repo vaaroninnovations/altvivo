@@ -95,9 +95,9 @@ export default function CookiesPage() {
 
       <h2 id="payments">4. Payment processors</h2>
       <p>
-        When you pay, the payment window is provided by <strong>Razorpay</strong> (India) or <strong>Stripe Checkout</strong> (elsewhere). They set their own
+        When you pay, the payment window is provided by <strong>Razorpay</strong>. It sets its own
         strictly necessary cookies on their domains (for example <code>razorpay.com</code>, <code>checkout.stripe.com</code>) for fraud prevention and to
-        complete the payment securely. These are governed by Razorpay&apos;s and Stripe&apos;s privacy and cookie policies; AltVivo cannot read them.
+        complete the payment securely. These are governed by Razorpay&apos;s privacy and cookie policy; AltVivo cannot read them.
       </p>
 
       <h2 id="optional">5. Optional cookies</h2>
@@ -106,8 +106,10 @@ export default function CookiesPage() {
           <strong>Preferences:</strong> remembers choices such as light or dark mode. Without consent, the choice is kept only for the current browser tab.
         </li>
         <li>
-          <strong>Analytics:</strong> the AltVivo portal does not use analytics cookies. XPRISM shows its own choice before loading Google Analytics on its public
-          pages, and loads nothing until you accept there.
+          <strong>Analytics:</strong> if you allow it, the public pages of altvivo.bio load Google Analytics, which sets <code>_ga</code> and{" "}
+          <code>_ga_&lt;ID&gt;</code> (up to 2 years) to count visits and pages. Nothing is loaded until you accept; withdrawing consent stops it and removes
+          those cookies. Signed-in pages (workspace, admin) are never measured and advertising features are switched off. XPRISM shows its own choice before
+          loading Google Analytics on its public pages.
         </li>
         <li>
           <strong>Marketing:</strong> AltVivo does not use advertising or remarketing cookies.

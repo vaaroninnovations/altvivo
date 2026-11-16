@@ -4,7 +4,7 @@ import type { Deps } from './deps.js';
 import { CookieManager } from './lib/cookies.js';
 import { CsrfService } from './lib/csrf.js';
 import { TokenService } from './lib/jwt.js';
-import { SmtpMailer, type Mailer } from './lib/mailer.js';
+import { SmtpMailer, configureMailBrand, type Mailer } from './lib/mailer.js';
 import { buildTrustedProxies } from './lib/net.js';
 import { RateLimiter, RevocationStore, createRedis } from './lib/redis.js';
 import { R2Storage, type ObjectStorage } from './lib/storage.js';
@@ -30,6 +30,7 @@ export async function createDeps(cfg: Config, o: Overrides = {}): Promise<Deps> 
   const tokens = await TokenService.create(cfg);
   const cookies = new CookieManager(cfg);
   const revocations = new RevocationStore(redis, cfg.ACCESS_TOKEN_TTL_SECONDS);
+  configureMailBrand({ webOrigin: cfg.webOrigin, supportEmail: cfg.SUPPORT_EMAIL, legalName: cfg.SELLER_LEGAL_NAME });
   const mailer = o.mailer ?? new SmtpMailer(cfg);
   return {
     cfg,

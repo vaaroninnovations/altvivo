@@ -40,7 +40,17 @@ export interface CatalogPlan {
   quoteAvailable: boolean;
 }
 
+/** An app sold per use: the price of one analysis (one animal / video), before GST. */
+export interface PayPerUse {
+  appId: string;
+  name: string;
+  amountMinor: number;
+  gstRateBp: number;
+  purchasable: boolean;
+}
+
 export interface CatalogResponse {
+  payPerUse?: PayPerUse[];
   currency: Currency;
   provider: "STRIPE" | "RAZORPAY";
   taxNote: string;
@@ -66,11 +76,11 @@ export interface AdvisoryMember {
   websiteUrl: string | null;
 }
 
-/** Paid access to one app, as returned by the session endpoints. */
+/** Access to one app (paid, or the one-month free access: source "trial"), as returned by the session endpoints. */
 export interface ApiEntitlement {
   active: boolean;
   level: "full" | "none";
-  source: "individual" | "bundle" | "institution" | "manual" | "vip" | null;
+  source: "trial" | "payg" | "individual" | "bundle" | "institution" | "manual" | "vip" | null;
   plan: string | null;
   expiresAt: string | null;
 }
@@ -126,7 +136,7 @@ export interface SessionUser {
   name: string;
   role: Role;
   orgId: string | null;
-  tier: "NONE" | "INDIVIDUAL" | "BUNDLE" | "INSTITUTIONAL" | "VIP";
+  tier: "NONE" | "TRIAL" | "INDIVIDUAL" | "BUNDLE" | "INSTITUTIONAL" | "VIP";
   emailVerified: boolean;
   entitlements: Record<string, ApiEntitlement>;
   creditsRemaining: number;
@@ -142,9 +152,29 @@ export interface WorkspaceApp extends PublicApp {
   onWaitlist: boolean;
 }
 
+/** A person's "one month free" request (GET /v1/api/workspace, POST /v1/public/trial-request). */
+export interface Trial {
+  id: string;
+  status: "PENDING" | "APPROVED" | "ACTIVE" | "DECLINED";
+  days: number;
+  appIds: string[];
+  startsAt: string | null;
+  endsAt: string | null;
+  createdAt: string;
+  ended: boolean;
+}
+
+/** GET /v1/public/trial-offer */
+export interface TrialOffer {
+  days: number;
+  apps: { appId: string; name: string }[];
+}
+
 export interface WorkspaceData {
   user: SessionUser;
   creditsRemaining: number;
+  trial: Trial | null;
+  trialDays: number;
   apps: WorkspaceApp[];
   recentFiles: { id: string; sourceApp: string; fileName: string; fileType: string; sizeBytes: number; createdAt: string }[];
   recentActivity: { id: string; timestamp: string; appId: string; eventType: string; resourceId: string | null; metadata: Record<string, unknown> }[];
