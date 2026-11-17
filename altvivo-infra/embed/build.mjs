@@ -11,7 +11,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // The AltVivo logos (src/logos/*.webp, 56 px tall) are inlined as data: URLs so
 // they load under every app's CSP (img-src allows data:) without another request.
 const logos = Object.fromEntries(
-  ["wordmark-light", "wordmark-dark", "mark-light", "mark-dark"].map((n) => [
+  ["wordmark-light", "wordmark-dark"].map((n) => [
     n, `data:image/webp;base64,${readFileSync(path.join(here, "src", "logos", `${n}.webp`)).toString("base64")}`,
   ]),
 );

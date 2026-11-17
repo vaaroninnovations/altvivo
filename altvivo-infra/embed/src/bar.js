@@ -29,7 +29,7 @@
   const VERSION = "1.2.0";
   const CHANNEL = "altvivo-session";
   const VIP_ROLES = new Set(["SUPERADMIN", "ADVISORY_BOARD"]);
-  // The AltVivo wordmark and mark (light / dark), inlined by build.mjs from src/logos/.
+  // The AltVivo wordmark (light / dark), inlined by build.mjs from src/logos/.
   // Empty in the unbuilt source, which then shows the plain mark and name.
   const LOGOS = /*__LOGOS__*/ {};
 
@@ -169,8 +169,11 @@ button { font:inherit; color:inherit; background:none; border:0; cursor:pointer;
 @media (max-width: 560px) {
   .current, .brand .word, .sep { display:none; } .credits .lbl { display:none; }
   .applogo img { height:24px; } .nav { margin-left:2px; }
-  :host([data-theme="light"]) .brand .wm.lt, :host([data-theme="dark"]) .brand .wm.dk { display:none; }
-  :host([data-theme="light"]) .brand .mk.lt, :host([data-theme="dark"]) .brand .mk.dk { display:block; height:24px; }
+  .brand img { height:20px; } .brand { padding:4px 2px; }
+  /* Logos and account on the first line; the app menu gets its own scrollable line below. */
+  .bar { flex-wrap:wrap; height:auto; min-height:48px; row-gap:0; padding-top:6px; padding-bottom:4px; }
+  .nav { order:10; flex:1 0 100%; margin:2px 0 0; }
+  .nav:not(:has(::slotted(*))) { display:none; }
   /* Pin menus to the viewport so they never run off-screen on phones. */
   .panel { position:fixed; left:12px; right:12px; top:56px; width:auto; max-height:calc(100dvh - 72px); overflow:auto; }
 }
@@ -381,8 +384,8 @@ button { font:inherit; color:inherit; background:none; border:0; cursor:pointer;
 
       const brand = el("a", { class: "brand", href: `${this.home}/`, title: "AltVivo home" });
       if (LOGOS["wordmark-light"]) {
-        // The original AltVivo logo; the mark alone on phones.
-        for (const [cls, key] of [["wm lt", "wordmark-light"], ["wm dk", "wordmark-dark"], ["mk lt", "mark-light"], ["mk dk", "mark-dark"]]) {
+        // The original AltVivo logo with its name, on every screen size.
+        for (const [cls, key] of [["wm lt", "wordmark-light"], ["wm dk", "wordmark-dark"]]) {
           brand.append(el("img", { class: cls, src: LOGOS[key], alt: "", "aria-hidden": "true", draggable: "false" }));
         }
         brand.append(el("span", { class: "sr", text: "AltVivo" }));
