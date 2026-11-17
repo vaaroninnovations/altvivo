@@ -8,7 +8,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const src = readFileSync(path.join(here, "src", "bar.js"), "utf8");
+// The AltVivo logos (src/logos/*.webp, 56 px tall) are inlined as data: URLs so
+// they load under every app's CSP (img-src allows data:) without another request.
+const logos = Object.fromEntries(
+  ["wordmark-light", "wordmark-dark", "mark-light", "mark-dark"].map((n) => [
+    n, `data:image/webp;base64,${readFileSync(path.join(here, "src", "logos", `${n}.webp`)).toString("base64")}`,
+  ]),
+);
+const raw = readFileSync(path.join(here, "src", "bar.js"), "utf8");
+if (!raw.includes("/*__LOGOS__*/ {}")) throw new Error("logo placeholder missing in src/bar.js");
+const src = raw.replace("/*__LOGOS__*/ {}", JSON.stringify(logos));
 const version = /v(\d+\.\d+\.\d+)/.exec(src)?.[1];
 if (!version) throw new Error("version banner missing in src/bar.js");
 

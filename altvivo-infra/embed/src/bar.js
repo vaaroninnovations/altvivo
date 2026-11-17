@@ -29,6 +29,9 @@
   const VERSION = "1.2.0";
   const CHANNEL = "altvivo-session";
   const VIP_ROLES = new Set(["SUPERADMIN", "ADVISORY_BOARD"]);
+  // The AltVivo wordmark and mark (light / dark), inlined by build.mjs from src/logos/.
+  // Empty in the unbuilt source, which then shows the plain mark and name.
+  const LOGOS = /*__LOGOS__*/ {};
 
   // --------------------------------------------------------------- icons ---
   // 24x24 stroke paths (lucide-style), drawn with DOM APIs (no innerHTML).
@@ -96,6 +99,8 @@ a { color:inherit; text-decoration:none; }
 button { font:inherit; color:inherit; background:none; border:0; cursor:pointer; }
 :focus-visible { outline:2px solid var(--av-accent); outline-offset:2px; border-radius:8px; }
 .brand { display:flex; align-items:center; gap:8px; font-weight:700; letter-spacing:-.01em; padding:4px 6px; border-radius:8px; }
+.brand img { height:26px; width:auto; display:none; }
+:host([data-theme="light"]) .brand .wm.lt, :host([data-theme="dark"]) .brand .wm.dk { display:block; }
 .mark { width:22px; height:22px; border-radius:6px; background:linear-gradient(135deg,#0EA5E9,#10B981); display:grid; place-items:center; color:#fff; }
 .sep { width:1px; height:20px; background:var(--av-line); margin:0 2px; }
 .current { font-weight:600; color:var(--av-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:40vw; }
@@ -164,6 +169,8 @@ button { font:inherit; color:inherit; background:none; border:0; cursor:pointer;
 @media (max-width: 560px) {
   .current, .brand .word, .sep { display:none; } .credits .lbl { display:none; }
   .applogo img { height:24px; } .nav { margin-left:2px; }
+  :host([data-theme="light"]) .brand .wm.lt, :host([data-theme="dark"]) .brand .wm.dk { display:none; }
+  :host([data-theme="light"]) .brand .mk.lt, :host([data-theme="dark"]) .brand .mk.dk { display:block; height:24px; }
   /* Pin menus to the viewport so they never run off-screen on phones. */
   .panel { position:fixed; left:12px; right:12px; top:56px; width:auto; max-height:calc(100dvh - 72px); overflow:auto; }
 }
@@ -372,8 +379,16 @@ button { font:inherit; color:inherit; background:none; border:0; cursor:pointer;
       const current = this._apps.find((a) => a.appId === this.appId);
       const bar = el("header", { class: "bar", part: "bar", role: "banner", "aria-label": "AltVivo" });
 
-      const brand = el("a", { class: "brand", href: `${this.home}/`, title: "AltVivo home" },
-        el("span", { class: "mark" }, icon("zap", 14)), el("span", { class: "word", text: "AltVivo" }));
+      const brand = el("a", { class: "brand", href: `${this.home}/`, title: "AltVivo home" });
+      if (LOGOS["wordmark-light"]) {
+        // The original AltVivo logo; the mark alone on phones.
+        for (const [cls, key] of [["wm lt", "wordmark-light"], ["wm dk", "wordmark-dark"], ["mk lt", "mark-light"], ["mk dk", "mark-dark"]]) {
+          brand.append(el("img", { class: cls, src: LOGOS[key], alt: "", "aria-hidden": "true", draggable: "false" }));
+        }
+        brand.append(el("span", { class: "sr", text: "AltVivo" }));
+      } else {
+        brand.append(el("span", { class: "mark" }, icon("zap", 14)), el("span", { class: "word", text: "AltVivo" }));
+      }
       bar.append(brand);
       // The app's own logo (brand slot), else the logo attribute, else its name.
       // Relative logo paths belong to the app's own site, not to altvivo.bio.
