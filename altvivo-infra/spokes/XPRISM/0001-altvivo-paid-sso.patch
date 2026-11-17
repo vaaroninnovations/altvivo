@@ -1,4 +1,4 @@
-From be83325dbc97653f52e29bf8f241f1a99851d34f Mon Sep 17 00:00:00 2001
+From d28b5fd06a7f6385983707a7e1672c30ce51d7f0 Mon Sep 17 00:00:00 2001
 From: AltVivo-Integration <integration@altvivo.invalid>
 Date: Sun, 15 Nov 2026 06:58:27 +0530
 Subject: [PATCH] AltVivo SSO with paid-entitlement gate; container image;
@@ -16,17 +16,18 @@ Subject: [PATCH] AltVivo SSO with paid-entitlement gate; container image;
  .dockerignore                           |  13 +
  Dockerfile                              |  39 ++
  config/settings.py                      |  15 +
- lab/altvivo_sso_middleware.py           | 498 ++++++++++++++++++++++++
- lab/context.py                          |   2 +-
+ lab/altvivo_sso_middleware.py           | 501 ++++++++++++++++++++++++
+ lab/context.py                          |  11 +-
  lab/forms.py                            |  15 +
  lab/migrations/0013_user_altvivo_sub.py |  16 +
  lab/models.py                           |   2 +
- lab/tests_altvivo.py                    | 282 ++++++++++++++
+ lab/tests_altvivo.py                    | 288 ++++++++++++++
  lab/urls.py                             |   1 +
  lab/views_staff.py                      |  39 +-
  lab/views_student.py                    |  27 +-
  requirements.txt                        |   5 +-
- 13 files changed, 947 insertions(+), 7 deletions(-)
+ templates/base.html                     |  14 +
+ 14 files changed, 979 insertions(+), 7 deletions(-)
  create mode 100644 .dockerignore
  create mode 100644 Dockerfile
  create mode 100644 lab/altvivo_sso_middleware.py
@@ -122,10 +123,10 @@ index 211f4b6..becf2dd 100644
 +    SITE_URL = env('ALTVIVO_PUBLIC_ORIGIN', SITE_URL)
 diff --git a/lab/altvivo_sso_middleware.py b/lab/altvivo_sso_middleware.py
 new file mode 100644
-index 0000000..8963db6
+index 0000000..5bcd8f2
 --- /dev/null
 +++ b/lab/altvivo_sso_middleware.py
-@@ -0,0 +1,498 @@
+@@ -0,0 +1,501 @@
 +"""AltVivo single sign-on and paid-entitlement gate for XPRISM.
 +
 +Active when ALTVIVO_JWKS_URL is set (config/settings.py). Layer 2 of the
@@ -507,10 +508,13 @@ index 0000000..8963db6
 +def _topbar_html():
 +    global TOPBAR
 +    if TOPBAR is None:
++        from django.templatetags.static import static
 +        from django.utils.html import escape
 +
++        # Pages that do not use base.html (the experiment simulators) get the bar with the XPRISM logo.
 +        TOPBAR = (f'<script src="{escape(S.embed_url)}" defer crossorigin="anonymous"></script>'
-+                  f'<altvivo-topbar app="{APP_ID}" api="{escape(S.api_url)}" home="{escape(S.home_url)}"></altvivo-topbar>').encode()
++                  f'<altvivo-topbar app="{APP_ID}" api="{escape(S.api_url)}" home="{escape(S.home_url)}"'
++                  f' logo="{escape(static("img/xprism-lockup.png"))}"></altvivo-topbar>').encode()
 +    return TOPBAR
 +
 +
@@ -625,10 +629,25 @@ index 0000000..8963db6
 +            response['Content-Length'] = str(len(response.content))
 +        return response
 diff --git a/lab/context.py b/lab/context.py
-index f4e7e52..ed24474 100644
+index f4e7e52..0bee7b6 100644
 --- a/lab/context.py
 +++ b/lab/context.py
-@@ -34,7 +34,7 @@ def site(request):
+@@ -27,6 +27,14 @@ def _analytics(request):
+     return ids if any(ids.values()) and not request.user.is_authenticated and request.path in PUBLIC_PAGES else None
+ 
+ 
++def _altvivo_bar():
++    """URLs for the shared AltVivo bar when SSO is on (base.html then draws one bar instead of two)."""
++    if not getattr(settings, 'ALTVIVO_SSO_ENABLED', False):
++        return None
++    from .altvivo_sso_middleware import S
++    return {'embed_url': S.embed_url, 'api_url': S.api_url, 'home_url': S.home_url}
++
++
+ def site(request):
+     u = request.user
+     college = getattr(u, 'college', None) if u.is_authenticated else None
+@@ -34,7 +42,7 @@ def site(request):
      if u.is_authenticated:
          r = u.role
          if r == Role.STUDENT:
@@ -637,6 +656,12 @@ index f4e7e52..ed24474 100644
          if r in (Role.FACULTY, Role.LAB_ASSISTANT):
              nav = [('Dashboard', '/faculty/'), ('Batches', '/faculty/batches/'), ('Experiments', '/modules/'), ('Feedback', '/feedback/')]
          if r == Role.COLLEGE_ADMIN:
+@@ -72,4 +80,5 @@ def site(request):
+                          and not request.path.startswith(('/documentation/', '/ethics/', '/about/','/privacy/', '/terms/', '/conditions/', '/consent/', '/accounts/'))),
+         'NEEDS_EMAIL_VERIFY': bool(u.is_authenticated and u.email and not u.email_verified and not u.is_platform_admin),
+         'ETHICS_VERSION': settings.ETHICS_VERSION, 'TRIAL_HOURS': settings.TRIAL_VISIT_MAX_HOURS,
++        'ALTVIVO': _altvivo_bar(),
+     }
 diff --git a/lab/forms.py b/lab/forms.py
 index 5caaee2..fc62591 100644
 --- a/lab/forms.py
@@ -700,10 +725,10 @@ index 2cf1fc7..f2b2669 100644
      def display_name(self):
 diff --git a/lab/tests_altvivo.py b/lab/tests_altvivo.py
 new file mode 100644
-index 0000000..05cf5e8
+index 0000000..d0b32cf
 --- /dev/null
 +++ b/lab/tests_altvivo.py
-@@ -0,0 +1,282 @@
+@@ -0,0 +1,288 @@
 +"""Tests for lab/altvivo_sso_middleware.py (AltVivo SSO + paid gate).
 +
 +Run with SSO switched on; the tests write their own JWKS to that path:
@@ -982,8 +1007,14 @@ index 0000000..05cf5e8
 +        u.save()
 +        page = self.get('/modules/', tok)
 +        self.assertEqual(page.status_code, 200)
-+        self.assertContains(page, '<altvivo-topbar app="xprism" api="https://api.altvivo.bio" home="https://altvivo.bio">')
++        self.assertContains(page, '<altvivo-topbar app="xprism" api="https://api.altvivo.bio" home="https://altvivo.bio" logo=')
 +        self.assertEqual(page.content.count(b'<altvivo-topbar'), 1)
++        # One bar: XPRISM's logo and menu sit inside it, its own header and tab row are gone.
++        self.assertContains(page, '<a slot="brand" href="/"')
++        self.assertContains(page, '>My data</a>')
++        self.assertNotContains(page, 'xp-subnav')
++        self.assertNotContains(page, 'site-header xp-header')
++        self.assertEqual(page.content.count(b'embed.altvivo.bio/bar.js'), 1)
 +        r = self.c.post('/accounts/logout/', secure=True)
 +        self.assertEqual(r['Location'], 'https://altvivo.bio/logout?next=https%3A%2F%2Fxprism.altvivo.bio%2F')
 diff --git a/lab/urls.py b/lab/urls.py
@@ -1143,6 +1174,41 @@ index e17dea8..e06f5d1 100644
 +whitenoise>=6.7,<7
 +PyJWT[crypto]>=2.9,<3
 +redis>=5,<6
+diff --git a/templates/base.html b/templates/base.html
+index b8781d9..872c103 100644
+--- a/templates/base.html
++++ b/templates/base.html
+@@ -14,9 +14,20 @@
+   <link rel="stylesheet" href="{% static 'css/site.css' %}">
+   <link rel="preload" href="{% static 'fonts/source-serif-4-latin-opsz-normal.woff2' %}" as="font" type="font/woff2" crossorigin>
+   {% block head %}{% endblock %}
++  <style>.xp-barlogo{height:30px;width:auto;display:block}@media (max-width:560px){.xp-barlogo{height:24px}}</style>
+ </head>
+ <body class="xp-app min-h-screen flex flex-col">
+   <a href="#main" class="xp-skip">Skip to main content</a>
++  {% if ALTVIVO and user.is_authenticated %}
++  {# One bar: the AltVivo bar carries the XPRISM logo and menu; account and sign-out live in its avatar menu. #}
++  <script src="{{ ALTVIVO.embed_url }}" defer crossorigin="anonymous"></script>
++  <altvivo-topbar app="xprism" api="{{ ALTVIVO.api_url }}" home="{{ ALTVIVO.home_url }}" logo="{% static 'img/xprism-lockup.png' %}">
++    <a slot="brand" href="/" title="XPRISM home"><img src="{% static 'img/xprism-lockup.png' %}" alt="XPRISM" width="98" height="33" class="xp-barlogo"></a>
++    {% for label, href in NAV %}<a href="{{ href }}"{% if request.path == href or href != '/' and request.path|slice:':14' == href|slice:':14' %} aria-current="page"{% endif %}>{{ label }}{% if label == 'Requests' and OPEN_REQUESTS %} <span class="xp-count">{{ OPEN_REQUESTS }}</span>{% endif %}{% if label == 'Free month' and PENDING_FREE_YEAR %} <span class="xp-count">{{ PENDING_FREE_YEAR }}</span>{% endif %}{% if label == 'Mailbox' and UNREAD_MAIL %} <span class="xp-count">{{ UNREAD_MAIL }}</span>{% endif %}{% if label == 'Contact' and PENDING_CONTACT %} <span class="xp-count">{{ PENDING_CONTACT }}</span>{% endif %}</a>{% endfor %}
++    {% if not user.is_platform_admin %}<a href="{% url 'contact' %}"{% if request.path == '/contact/' %} aria-current="page"{% endif %}>Contact</a>{% endif %}
++    <a href="{% url 'my_data' %}"{% if request.path == '/me/data/' %} aria-current="page"{% endif %}>My data</a>
++  </altvivo-topbar>
++  {% else %}
+   <header class="site-header xp-header">
+     <div class="xp-header-in">
+       <a href="/" title="XPRISM home" class="xp-logo"><img src="{% static 'img/xprism-lockup.png' %}" alt="XPRISM" width="146" height="49"></a>
+@@ -71,6 +82,9 @@
+       </div>
+     </div>
+   </nav>
++  {% endif %}
++  {% endif %}
++  {% if user.is_authenticated %}
+   {% if user.is_shared_demo %}<div class="xp-strip xp-strip-warn" role="status"><b>Shared demo:</b> sample data only, visible to everyone using this login. Don't enter real student details. Resets every night.</div>{% endif %}
+   {% endif %}
+   {% if SHOW_FREE_YEAR %}<div class="xp-strip"><b>Use XPRISM for 1 month, free of cost.</b> <button type="button" data-free-year-open>Apply here</button></div>{% endif %}
 -- 
 2.56.0.windows.2
 

@@ -1,5 +1,5 @@
 /*!
- * <altvivo-topbar> v1.1.0 - shared AltVivo bar for every *.altvivo.bio app.
+ * <altvivo-topbar> v1.2.0 - shared AltVivo bar for every *.altvivo.bio app.
  * Zero dependencies. Waffle app switcher with licence status (licensed /
  * locked -> upgrade), live credit balance, account menu, silent session
  * refresh and cross-tab sign-out.
@@ -7,9 +7,18 @@
  *   <script src="https://embed.altvivo.bio/bar.js" defer crossorigin="anonymous"></script>
  *   <altvivo-topbar app="xprism"></altvivo-topbar>
  *
+ * One bar per page: an app puts its own logo and menu inside it instead of
+ * drawing a second header.
+ *   <altvivo-topbar app="xprism">
+ *     <a slot="brand" href="/"><img src="/logo.png" alt="XPRISM"></a>   (replaces the app name)
+ *     <a href="/modules/" aria-current="page">Modules</a>                (default slot: app menu)
+ *     <button slot="actions">…</button>                                 (before credits)
+ *   </altvivo-topbar>
+ *
  * Attributes: app (current app id), api (default https://api.altvivo.bio),
  *             home (default https://altvivo.bio), theme (auto | light | dark),
- *             sticky (present by default; set sticky="false" to disable)
+ *             sticky (present by default; set sticky="false" to disable),
+ *             logo (app logo image URL, same site or *.altvivo.bio; shown when no brand slot is given)
  * Events (bubble, composed): altvivo:session {detail:{user}}, altvivo:signedout
  * API: el.user, el.apps, el.refresh(), el.signOut()
  */
@@ -17,7 +26,7 @@
   "use strict";
   if (typeof window === "undefined" || !window.customElements || customElements.get("altvivo-topbar")) return;
 
-  const VERSION = "1.1.0";
+  const VERSION = "1.2.0";
   const CHANNEL = "altvivo-session";
   const VIP_ROLES = new Set(["SUPERADMIN", "ADVISORY_BOARD"]);
 
@@ -91,6 +100,18 @@ button { font:inherit; color:inherit; background:none; border:0; cursor:pointer;
 .sep { width:1px; height:20px; background:var(--av-line); margin:0 2px; }
 .current { font-weight:600; color:var(--av-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:40vw; }
 .spacer { flex:1; }
+.applogo { display:flex; align-items:center; height:36px; padding:0 4px; border-radius:8px; flex-shrink:0; }
+.applogo img { height:28px; width:auto; display:block; }
+:host([data-theme="dark"]) .applogo img { background:#fff; border-radius:6px; padding:2px 6px; }
+::slotted([slot="brand"]) { display:flex; align-items:center; flex-shrink:0; height:36px; }
+.nav { flex:1; min-width:0; display:flex; align-items:center; gap:2px; overflow-x:auto; scrollbar-width:none; margin-left:6px; }
+.nav::-webkit-scrollbar { display:none; }
+.nav ::slotted(a), .nav ::slotted(button) { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 10px; border-radius:8px;
+  color:var(--av-muted); font-weight:500; font-size:13.5px; white-space:nowrap; text-decoration:none; }
+.nav ::slotted(a:hover), .nav ::slotted(button:hover) { background:var(--av-soft); color:var(--av-fg); }
+.nav ::slotted([aria-current="page"]), .nav ::slotted(.active) { background:var(--av-soft); color:var(--av-fg); font-weight:600;
+  box-shadow:inset 0 -2px 0 var(--av-accent); }
+.actions { display:flex; align-items:center; gap:6px; }
 .iconbtn { width:36px; height:36px; display:grid; place-items:center; border-radius:10px; color:var(--av-muted); }
 .iconbtn:hover, .iconbtn[aria-expanded="true"] { background:var(--av-soft); color:var(--av-fg); }
 .credits { display:flex; align-items:center; gap:6px; height:30px; padding:0 10px; border:1px solid var(--av-line); border-radius:999px;
@@ -142,6 +163,7 @@ button { font:inherit; color:inherit; background:none; border:0; cursor:pointer;
 .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
 @media (max-width: 560px) {
   .current, .brand .word, .sep { display:none; } .credits .lbl { display:none; }
+  .applogo img { height:24px; } .nav { margin-left:2px; }
   /* Pin menus to the viewport so they never run off-screen on phones. */
   .panel { position:fixed; left:12px; right:12px; top:56px; width:auto; max-height:calc(100dvh - 72px); overflow:auto; }
 }
@@ -190,7 +212,7 @@ button { font:inherit; color:inherit; background:none; border:0; cursor:pointer;
 
   // ------------------------------------------------------------- element ---
   class AltVivoTopbar extends HTMLElement {
-    static get observedAttributes() { return ["app", "theme"]; }
+    static get observedAttributes() { return ["app", "theme", "logo"]; }
 
     constructor() {
       super();
@@ -353,8 +375,19 @@ button { font:inherit; color:inherit; background:none; border:0; cursor:pointer;
       const brand = el("a", { class: "brand", href: `${this.home}/`, title: "AltVivo home" },
         el("span", { class: "mark" }, icon("zap", 14)), el("span", { class: "word", text: "AltVivo" }));
       bar.append(brand);
-      if (current) bar.append(el("span", { class: "sep", "aria-hidden": "true" }), el("span", { class: "current", text: current.name }));
-      bar.append(el("span", { class: "spacer" }));
+      // The app's own logo (brand slot), else the logo attribute, else its name.
+      // Relative logo paths belong to the app's own site, not to altvivo.bio.
+      const logo = this.getAttribute("logo") ? trustedUrl(this.getAttribute("logo"), location.href) : null;
+      const name = current?.name || "";
+      const fallback = logo
+        ? el("a", { class: "applogo", href: "/", title: `${name || "App"} home` }, el("img", { src: logo, alt: name || "App" }))
+        : name ? el("span", { class: "current", text: name }) : null;
+      const brandSlot = el("slot", { name: "brand" });
+      if (fallback) brandSlot.append(fallback);
+      bar.append(el("span", { class: "sep", "aria-hidden": "true" }), brandSlot);
+      // The app's menu (default slot) takes the free space; empty, it is just a spacer.
+      bar.append(el("nav", { class: "nav", "aria-label": `${name || "App"} menu`, part: "nav" }, el("slot")));
+      bar.append(el("span", { class: "actions", part: "actions" }, el("slot", { name: "actions" })));
 
       if (this._user) {
         const credits = el("a", {

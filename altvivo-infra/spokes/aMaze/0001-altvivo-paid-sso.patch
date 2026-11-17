@@ -1,4 +1,4 @@
-From bb29bde651e60517d96fc1619a654777cd517ec7 Mon Sep 17 00:00:00 2001
+From 311d473d5f9d19b6c26812d3b433547656628b03 Mon Sep 17 00:00:00 2001
 From: AltVivo-Integration <integration@altvivo.invalid>
 Date: Sun, 15 Nov 2026 06:58:28 +0530
 Subject: [PATCH] Serve as a static app behind AltVivo SSO + paid gate; retire
@@ -15,32 +15,33 @@ data/users.json contained a personal record.
 - contact form posts to api.altvivo.bio/v1/public/contact and reports failures honestly
 - <altvivo-topbar>; inline theme script moved to /theme-init.js (CSP without unsafe-inline)
 ---
- .env.example               |  71 +--
- DEPLOYMENT.md              | 276 ++----------
- Dockerfile                 |  83 ++--
- README.md                  |  49 +--
- data/contacts.json         |   1 -
- data/projects.json         | 207 ---------
- data/trials/.gitkeep       |   0
- data/uploads/.gitkeep      |   0
- data/users.json            |  13 -
- deploy.sh                  |  81 ----
- docker-compose.yml         |  26 --
- ecosystem.config.cjs       |  20 -
- index.html                 |  17 +-
- nginx.conf                 | 120 +++---
- package-lock.json          | 856 -------------------------------------
- package.json               |  13 +-
- public/theme-init.js       |  12 +
- server/api.mjs             | 221 ----------
- server/auth.mjs            | 444 -------------------
- server/db.mjs              | 355 ---------------
- server/index.mjs           | 165 -------
- src/lib/altvivo.ts         | 132 ++++++
- src/lib/mock-auth.tsx      | 169 ++++----
- src/pages/contact/page.tsx |  33 +-
- src/vite-env.d.ts          |  10 +
- 25 files changed, 406 insertions(+), 2968 deletions(-)
+ .env.example                  |  71 +--
+ DEPLOYMENT.md                 | 276 ++---------
+ Dockerfile                    |  83 ++--
+ README.md                     |  49 +-
+ data/contacts.json            |   1 -
+ data/projects.json            | 207 --------
+ data/trials/.gitkeep          |   0
+ data/uploads/.gitkeep         |   0
+ data/users.json               |  13 -
+ deploy.sh                     |  81 ----
+ docker-compose.yml            |  26 --
+ ecosystem.config.cjs          |  20 -
+ index.html                    |  17 +-
+ nginx.conf                    | 120 ++---
+ package-lock.json             | 856 ----------------------------------
+ package.json                  |  13 +-
+ public/theme-init.js          |  12 +
+ server/api.mjs                | 221 ---------
+ server/auth.mjs               | 444 ------------------
+ server/db.mjs                 | 355 --------------
+ server/index.mjs              | 165 -------
+ src/components/app-header.tsx |  53 ++-
+ src/lib/altvivo.ts            | 132 ++++++
+ src/lib/mock-auth.tsx         | 169 +++----
+ src/pages/contact/page.tsx    |  33 +-
+ src/vite-env.d.ts             |  10 +
+ 26 files changed, 458 insertions(+), 2969 deletions(-)
  delete mode 100644 data/contacts.json
  delete mode 100644 data/projects.json
  delete mode 100644 data/trials/.gitkeep
@@ -1005,10 +1006,10 @@ index 5018d27..0000000
 -  ],
 -};
 diff --git a/index.html b/index.html
-index 524e9d1..c837617 100644
+index afe7563..693031a 100644
 --- a/index.html
 +++ b/index.html
-@@ -34,22 +34,15 @@
+@@ -31,22 +31,15 @@
      />
  
      <!-- Detect dark mode preference and set the class before next-themes loads. This avoids a flash of unstyled content (FOUC) when the page loads. -->
@@ -1032,7 +1033,7 @@ index 524e9d1..c837617 100644
      <link href="/src/index.css" rel="stylesheet" />
    </head>
    <body>
-+    <altvivo-topbar app="amaze" sticky="false"></altvivo-topbar>
++    <altvivo-topbar app="amaze"></altvivo-topbar>
      <div id="root"></div>
      <script type="module" src="/src/main.tsx"></script>
    </body>
@@ -3628,6 +3629,85 @@ index ca0f06c..0000000
 -    process.exit(0);
 -  });
 -});
+diff --git a/src/components/app-header.tsx b/src/components/app-header.tsx
+index a9400ff..f015fe7 100644
+--- a/src/components/app-header.tsx
++++ b/src/components/app-header.tsx
+@@ -1,6 +1,8 @@
+ import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+ import BrandLogo from "./brand-logo.tsx";
+-import { useEffect } from "react";
++import { useEffect, useState } from "react";
++import { createPortal } from "react-dom";
++import { useTheme } from "next-themes";
+ import type { ReactNode } from "react";
+ import { useConvexAuth, useAuthActions } from "@convex-dev/auth/react";
+ import { useQuery } from "convex/react";
+@@ -49,8 +51,55 @@ function initials(name?: string) {
+     : "U";
+ }
+ 
++/** The shared <altvivo-topbar> in index.html, when present. */
++function useAltVivoBar() {
++  const [bar] = useState<HTMLElement | null>(() =>
++    typeof document === "undefined" ? null : document.querySelector<HTMLElement>("altvivo-topbar"),
++  );
++  return bar;
++}
++
++/**
++ * One bar per page: aMaze's logo, menu and page actions are placed inside the
++ * AltVivo bar (its slots), which already has the account menu, sign-out,
++ * credits and app switcher.
++ */
++function BarContent({ bar, children, isAuthenticated }: { bar: HTMLElement; children?: ReactNode; isAuthenticated: boolean }) {
++  const { resolvedTheme } = useTheme();
++  useEffect(() => {
++    if (resolvedTheme === "dark" || resolvedTheme === "light") bar.setAttribute("theme", resolvedTheme);
++  }, [bar, resolvedTheme]);
++  const links = isAuthenticated
++    ? [
++        { to: "/track", label: "Tracking Workspace", icon: ScanLine },
++        { to: "/projects", label: "My Projects", icon: FolderKanban },
++        { to: "/settings", label: "Settings", icon: Settings },
++        { to: "/contact", label: "Contact", icon: Mail },
++      ]
++    : [{ to: "/contact", label: "Contact", icon: Mail }];
++  return createPortal(
++    <>
++      <Link slot="brand" to="/" className="flex shrink-0 cursor-pointer items-center gap-2" title="aMaze home">
++        <BrandLogo markClassName="size-7" wordmarkClassName="text-[16px]" />
++      </Link>
++      {links.map((n) => (
++        <NavLink key={n.to} to={n.to}>
++          <n.icon className="size-3.5" aria-hidden />
++          <span>{n.label}</span>
++        </NavLink>
++      ))}
++      <span slot="actions" className="flex items-center gap-2">
++        {children}
++        <ThemeToggle />
++      </span>
++    </>,
++    bar,
++  );
++}
++
+ /** Logo, main navigation and account menu, shared by every page. */
+ export default function AppHeader({ children }: { children?: ReactNode }) {
++  const bar = useAltVivoBar();
+   const { isAuthenticated, isLoading } = useConvexAuth();
+   const { signOut } = useAuthActions();
+   const location = useLocation();
+@@ -82,6 +131,8 @@ export default function AppHeader({ children }: { children?: ReactNode }) {
+     ? NAV.filter((item) => item.to === "/track")
+     : [];
+ 
++  if (bar) return <BarContent bar={bar} isAuthenticated={isAuthenticated}>{children}</BarContent>;
++
+   return (
+     <header className="sticky top-0 z-30 border-b bg-background/85 backdrop-blur">
+       <div className="mx-auto flex h-14 max-w-[1600px] items-center justify-between gap-3 px-4">
 diff --git a/src/lib/altvivo.ts b/src/lib/altvivo.ts
 new file mode 100644
 index 0000000..5563dd7
@@ -3977,7 +4057,7 @@ index 3a3ef04..b2d8e0c 100644
    };
  }
 diff --git a/src/pages/contact/page.tsx b/src/pages/contact/page.tsx
-index f4be59d..36a1c77 100644
+index 6f607b5..4d87f2d 100644
 --- a/src/pages/contact/page.tsx
 +++ b/src/pages/contact/page.tsx
 @@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button.tsx";
