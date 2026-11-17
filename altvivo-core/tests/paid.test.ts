@@ -133,9 +133,8 @@ describe('paid gate (Caddy forward_auth)', () => {
     expect((await verify('../x', undefined)).statusCode).toBe(400);
   });
 
-  it('sends Phase 2 hosts to the coming-soon page', async () => {
-    const r = await verify('pharmadme', paid.b.get('altvivo_at'));
-    expect(r.headers.location).toBe('https://altvivo.bio/coming-soon?app=pharmadme');
+  it('treats removed apps as unknown', async () => {
+    for (const id of ['pharmadme', 'stat', 'phytonet', 'mira']) expect((await verify(id, paid.b.get('altvivo_at'))).statusCode).toBe(404);
   });
 
   it('signed in without a licence: upgrade page (navigation) or 403 (API)', async () => {
@@ -189,7 +188,6 @@ describe('paid gate (Caddy forward_auth)', () => {
     expect(ok.statusCode).toBe(200);
     expect(ok.headers['x-altvivo-access']).toBe('vip');
     expect(ok.headers['x-altvivo-role']).toBe('ADVISORY_BOARD');
-    expect((await verify('pharmadme', adv.b.get('altvivo_at'))).headers.location).toContain('/coming-soon');
 
     expect((await verify('xprism', admin.b.get('altvivo_at'))).statusCode).toBe(200);
     const unenrolled = await verifiedUser('newadmin@altvivo.bio');
@@ -206,7 +204,7 @@ describe('paid gate (Caddy forward_auth)', () => {
     expect((await verify('xprism', paid.b.get('altvivo_at'))).headers.location).toContain('/v1/auth/refresh/bounce');
     await paid.b.request('POST', '/v1/auth/refresh');
     await admin.b.request('POST', '/v1/auth/refresh');
-    expect((await verify('xprism', paid.b.get('altvivo_at'))).headers.location).toBe('https://altvivo.bio/coming-soon?app=xprism&state=maintenance');
+    expect((await verify('xprism', paid.b.get('altvivo_at'))).headers.location).toBe('https://altvivo.bio/maintenance?app=xprism');
     expect((await verify('xprism', paid.b.get('altvivo_at'), { nav: false })).statusCode).toBe(503);
     expect((await verify('xprism', admin.b.get('altvivo_at'))).statusCode).toBe(200);
     expect((await flip('LIVE')).statusCode).toBe(200);
@@ -549,7 +547,7 @@ describe('SUPERADMIN licences, pricing, CMS and audit', () => {
     expect((await admin.b.request('DELETE', `/v1/api/admin/advisory-board/${json(hidden).member.id}`)).statusCode).toBe(204);
   });
 
-  it('dashboard reports revenue, licences and waitlist', async () => {
+  it('dashboard reports revenue and licences', async () => {
     const d = json(await admin.b.request('GET', '/v1/api/admin/dashboard'));
     expect(d.revenueLast30Days.find((r: { currency: string }) => r.currency === 'INR').grossMinor).toBeGreaterThan(0);
     expect(d.recurringRevenue.length).toBeGreaterThan(0);

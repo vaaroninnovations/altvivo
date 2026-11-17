@@ -70,7 +70,7 @@ const core = createCoreClient();                                    // ALTVIVO_C
 ```
 
 - **What it shows.**
-  - A waffle app switcher. LIVE and BETA apps are links with an entitlement badge (Full, Pro, Trial, or Upgrade); COMING_SOON apps carry a **SOON** pill.
+  - A waffle app switcher. LIVE and BETA apps are links with an entitlement badge (Full, Pro, Trial, or Upgrade).
   - The live credit balance.
   - An account menu with sign-out.
   - A "Verify your email" notice when needed.

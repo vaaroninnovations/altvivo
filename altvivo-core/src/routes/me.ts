@@ -52,10 +52,9 @@ export default async function meRoutes(app: FastifyInstance, d: Deps) {
   app.get('/v1/api/workspace', opts, async (req) => {
     const claims = req.auth!;
     const user = await d.prisma.user.findUniqueOrThrow({ where: { id: claims.sub }, select: { role: true, mfaEnabled: true, disabledAt: true } });
-    const [apps, rows, waitlist, files, activity, credits, trial] = await Promise.all([
+    const [apps, rows, files, activity, credits, trial] = await Promise.all([
       listApps(d.prisma, d.redis),
       loadAccess(d.prisma, claims.sub),
-      d.prisma.appWaitlist.findMany({ where: { OR: [{ userId: claims.sub }, { email: claims.email }] }, select: { appId: true } }),
       d.prisma.workspaceFile.findMany({
         where: { ownerId: claims.sub, deletedAt: null },
         orderBy: { createdAt: 'desc' },
@@ -78,7 +77,6 @@ export default async function meRoutes(app: FastifyInstance, d: Deps) {
       vipEligible: user.disabledAt === null && (!MFA_REQUIRED_ROLES.has(user.role) || (user.mfaEnabled && claims.mfa)),
     });
     const api = toApiEntitlements(entitlements);
-    const listed = new Set(waitlist.map((w) => w.appId));
     return {
       user: publicUser(claims),
       creditsRemaining: Number(credits[0]?.balance ?? 0),
@@ -89,7 +87,6 @@ export default async function meRoutes(app: FastifyInstance, d: Deps) {
         ...a,
         entitlement: api[a.appId] ?? { active: false, level: 'none', source: null, plan: null, expiresAt: null },
         upgradeUrl: `${d.cfg.webOrigin}/workspace/upgrade?app=${a.appId}&reason=subscription_required`,
-        onWaitlist: listed.has(a.appId),
       })),
       recentFiles: files.map((f) => ({ ...f, sizeBytes: Number(f.sizeBytes) })),
       recentActivity: activity.map((a) => ({ ...a, id: a.id.toString() })),
@@ -150,34 +147,6 @@ export default async function meRoutes(app: FastifyInstance, d: Deps) {
     await d.sessions.revokeSession(id, 'user_revoked', actorOf(req));
     if (id === claims.sid) d.cookies.clearSession(reply);
     return reply.code(204).send();
-  });
-
-  // ------------------------------------------- early-access toggles --------
-  app.post('/v1/api/waitlist/:appId', opts, async (req, reply) => {
-    const { appId } = parse(AppIdParam, req.params);
-    const claims = req.auth!;
-    const appRow = await d.prisma.appRegistry.findUnique({ where: { appId }, select: { status: true } });
-    if (!appRow) throw notFound('UNKNOWN_APP', 'Unknown application');
-    if (appRow.status === 'LIVE') throw badRequest('APP_ALREADY_LIVE', 'This application is already available');
-    await withAudit(d.prisma, actorOf(req), async (tx) => {
-      await tx.appWaitlist.upsert({
-        where: { email_appId: { email: claims.email, appId } },
-        create: { email: claims.email, appId, userId: claims.sub, source: 'workspace' },
-        update: { userId: claims.sub },
-      });
-      await audit(tx, 'WAITLIST.JOIN', appId, { source: 'workspace' });
-    });
-    return reply.code(201).send({ appId, onWaitlist: true });
-  });
-
-  app.delete('/v1/api/waitlist/:appId', opts, async (req) => {
-    const { appId } = parse(AppIdParam, req.params);
-    const claims = req.auth!;
-    await withAudit(d.prisma, actorOf(req), async (tx) => {
-      const res = await tx.appWaitlist.deleteMany({ where: { appId, OR: [{ userId: claims.sub }, { email: claims.email }] } });
-      if (res.count) await audit(tx, 'WAITLIST.LEAVE', appId, {});
-    });
-    return { appId, onWaitlist: false };
   });
 
   app.get<{ Querystring: { limit?: string } }>('/v1/api/credits/ledger', opts, async (req) => {

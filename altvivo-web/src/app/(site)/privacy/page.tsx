@@ -104,8 +104,7 @@ export default function PrivacyPage() {
       <h3>3.5 Communications and consent</h3>
       <p>
         Messages you send us through contact forms or email, requests for one month of free access (your name, email address, institution, role, the
-        applications you asked for and how you plan to use them, kept as the record of who received a free month), early-access waitlist sign-ups (email
-        address and the application), and records of your cookie
+        applications you asked for and how you plan to use them, kept as the record of who received a free month), and records of your cookie
         choices (a random identifier stored in your browser, the choices, the policy version, the time, your browser user agent and a one-way hash of your IP
         address).
       </p>
@@ -168,11 +167,6 @@ export default function PrivacyPage() {
             <td>Service emails (verification, receipts, security alerts, licence renewal reminders)</td>
             <td>Consent for the account; necessary for the service</td>
             <td>Contract</td>
-          </tr>
-          <tr>
-            <td>Launch emails to the early-access waitlist</td>
-            <td>Your consent when you join</td>
-            <td>Consent (Art. 6(1)(a))</td>
           </tr>
           <tr>
             <td>Optional preference, analytics or marketing cookies</td>
@@ -264,7 +258,7 @@ export default function PrivacyPage() {
           <strong>Sessions:</strong> sign-in sessions end after at most 30 days; expired refresh tokens and one-time links are deleted within 7 days of expiry.
         </li>
         <li>
-          <strong>Contact messages and waitlist entries:</strong> until the request is resolved or the application launches, and then for up to 24 months.
+          <strong>Contact messages:</strong> until the request is resolved, and then for up to 24 months.
         </li>
         <li>
           <strong>Consent records:</strong> for as long as the choice applies and 24 months after you change it, as evidence of the consent given.

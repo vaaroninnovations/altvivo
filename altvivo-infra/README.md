@@ -12,8 +12,7 @@ Production edge, data tier and host hardening for **altvivo.bio** on a single Ub
           │    ├─ api.altvivo.bio ........ altvivo-core:4000                      │
           │    ├─ embed.altvivo.bio ...... /srv/embed/bar.js (static)             │
           │    ├─ xprism.altvivo.bio ..... [paid gate] → xprism:8000   LIVE       │
-          │    ├─ amaze.altvivo.bio ...... [paid gate] → amaze:8080    LIVE       │
-          │    └─ pharmadme|stat|phytonet|mira.altvivo.bio → altvivo-web /coming-soon │
+          │    └─ amaze.altvivo.bio ...... [paid gate] → amaze:8080    LIVE       │
           │  altvivo_data (internal: true, 172.30.10.0/24)                         │
           │    ├─ postgres:16  (db_core, xprism, … one DB per spoke with a server) │
           │    └─ redis:7      (ACL user per service, key-prefix isolation)        │
@@ -24,12 +23,11 @@ Production edge, data tier and host hardening for **altvivo.bio** on a single Ub
 
 | Path | Purpose |
 |---|---|
-| `docker-compose.yml` | Whole stack; Phase-2 spokes are commented plug-in blocks |
+| `docker-compose.yml` | Whole stack |
 | `caddy/Dockerfile` | Caddy + `caddy-dns/cloudflare`, `caddy-ratelimit`, `caddy-cloudflare-ip`; runs as uid 10001 |
 | `caddy/Caddyfile` | Global TLS/headers/routing, maintenance fallback for down spokes |
 | `caddy/spokes-enabled/*.caddy` | Active spoke upstreams (xprism, amaze), each behind the `paid_gate` `forward_auth` |
 | `caddy/spokes-available/*.caddy` | Route templates for every app (copied in by `spoke-route.sh`) |
-| `caddy/coming-soon.caddy` | Holding route for Phase-2 hosts |
 | `postgres/pg_hba.conf` | Network auth: per-role, data subnet only, superuser TCP rejected |
 | `postgres/initdb/init-multi-db.sh` | First-boot roles, databases, default privileges, extensions |
 | `redis/redis.conf` | AOF persistence, `noeviction`, ACL file |
@@ -183,25 +181,20 @@ Also on a shared server:
 - **Redis**: `default` user disabled. Each service gets its own ACL user with a hashed password, restricted to `<service>:*` keys and no `@dangerous` commands. Spokes get **read-only** access to `core:revoked:*` (instant logout) and `core:registry:*`. `noeviction` means security state is never silently dropped.
 - **Backups**: encrypted to an age public key whose private half stays offline. Includes SHA-256 manifest, `pg_restore --list` verification, remote checksum check, retention, a dead-man's-switch ping and the audit-chain head for tamper-evident restores.
 
-## Launching a Phase-2 spoke (e.g. PharmADME)
+## Adding a new spoke
 
+Write its `caddy/spokes-available/<app>.caddy` and Compose service, add the app to `KNOWN_APPS` in `scripts/lib.sh`, then:
 ```bash
-sudo ./scripts/generate-secrets.sh --spoke pharmadme
+sudo ./scripts/generate-secrets.sh --spoke <app>
 ```
 ```bash
-./scripts/provision-spoke-db.sh pharmadme
+./scripts/provision-spoke-db.sh <app>
 ```
+Append `,<app>:${<APP>_SERVICE_TOKEN}` to `SPOKE_SERVICE_TOKENS` on `altvivo-core`, start it with `docker compose up -d altvivo-core <app>`, then route it:
 ```bash
-docker compose restart redis
+./scripts/spoke-route.sh enable <app>
 ```
-Then append `,pharmadme:${PHARMADME_SERVICE_TOKEN}` to `SPOKE_SERVICE_TOKENS` on `altvivo-core`, uncomment the `pharmadme` block in `docker-compose.yml`, and run:
-```bash
-docker compose up -d altvivo-core pharmadme
-```
-```bash
-./scripts/spoke-route.sh enable pharmadme
-```
-Finally flip `app_registry.status` to `BETA`/`LIVE` in `/workspace/admin/apps`. Until the route is enabled, visitors keep seeing the Launching Soon page. If a spoke container goes down later, Caddy serves `/coming-soon?app=<id>&state=maintenance` instead of a 502.
+Add its `app_registry` row (status `MAINTENANCE` until it is ready, then `BETA`/`LIVE` in `/admin/apps`). If a spoke container goes down later, Caddy serves `/maintenance?app=<id>` instead of a 502.
 
 ## JWT key rotation
 

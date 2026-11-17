@@ -187,11 +187,4 @@ export const templates = {
       html: layout(subject, `<div style="white-space:pre-wrap">${escapeHtml(body)}</div>`, 'This message was sent to you by the AltVivo team. You can reply to this email.'),
     };
   },
-  appLaunched(appName: string, link: string): Omit<MailMessage, 'to'> {
-    return {
-      subject: `${appName} is now live on AltVivo`,
-      text: `${appName} has launched. You joined the early-access list - open it here:\n${link}`,
-      html: layout(`${appName} is live`, `<p>You joined the early-access list for <strong>${escapeHtml(appName)}</strong>. It is now available on AltVivo.</p>${button(link, `Open ${appName}`)}`),
-    };
-  },
 };

@@ -32,7 +32,7 @@ Module 1 wires Caddy, XPRISM, aMaze and the top bar against the interfaces below
   - `active` is `true` only for a paid grant that is in force: an individual subscription, a dual-suite bundle, an institutional seat, or a manual grant by a SUPERADMIN.
   - `expires_at` is epoch seconds, or `null` for open-ended grants.
   - Spokes refuse when `active !== true` or `expires_at <= now`.
-- **No permanent free tier.** Waitlists and default access never set `active: true`. The only free access is the one-month free grant a SUPERADMIN approves (`source: "trial"`, always with `expires_at`).
+- **No permanent free tier.** Default access never sets `active: true`. The only free access is the one-month free grant a SUPERADMIN approves (`source: "trial"`, always with `expires_at`).
 - **Roles.** `role` is one of `STUDENT | RESEARCHER | PI | INSTITUTE_ADMIN | ADVISORY_BOARD | SUPERADMIN`. `SUPERADMIN` and `ADVISORY_BOARD` bypass billing (env `PAID_GATE_VIP_ROLES` on core, `ALTVIVO_VIP_ROLES` on spokes).
 - **XPRISM admin.** XPRISM grants its platform-admin role only to `SUPERADMIN` with `mfa: true`.
 - **Tier.** `tier` is `NONE | TRIAL | INDIVIDUAL | BUNDLE | INSTITUTIONAL | VIP` (the best grant held); `source` is `trial | payg | individual | bundle | institution | manual | vip`. `payg` is pay per use: the app is open while the person has prepaid analyses left (`credits_remaining > 0`), `expires_at` is null, and a subscription, licence or free month always takes precedence over it. `trial` is the one-month free access a SUPERADMIN approved (`POST /v1/public/trial-request`, `/admin/trials`): a normal time-boxed grant with `expires_at`, treated by spokes exactly like a paid one.
@@ -52,8 +52,7 @@ It must answer from the JWT and the Redis revocation list only (no database quer
 | No / invalid / revoked token | `302 https://altvivo.bio/login?redirect=<original URL>` | `401 {"error":"unauthenticated","redirect":…}` |
 | Token expired | `302 https://api.altvivo.bio/v1/auth/refresh/bounce?next=<original URL>` | `401 {"error":"session_expired","refreshUrl":…}` |
 | Signed in, not paid / expired grant | `302 https://altvivo.bio/workspace/upgrade?app=<id>&reason=subscription_required` (or `subscription_expired`) | `403 {"error":"subscription_required","redirect":…}` |
-| App `MAINTENANCE` (non-VIP) | `302 https://altvivo.bio/coming-soon?app=<id>&state=maintenance` (portal host; a spoke-host URL would loop back through the gate) | `503` |
-| App `COMING_SOON` | `302 https://altvivo.bio/coming-soon?app=<id>` | `404` |
+| App `MAINTENANCE` (non-VIP) | `302 https://altvivo.bio/maintenance?app=<id>` (portal host; a spoke-host URL would loop back through the gate) | `503` |
 
 - **Rejected `next`/`redirect` values.** Anything outside `https://*.altvivo.bio` is rejected.
 - **Header copying.** Caddy copies only the five `X-AltVivo-*` headers, and drops client-supplied copies of them.
@@ -78,7 +77,7 @@ It must answer from the JWT and the Redis revocation list only (no database quer
 | `/workspace/upgrade?app=<id>&reason=<reason>` | Explains the missing licence and opens checkout for that app or the bundle |
 | `/workspace/security` | Password, TOTP, sessions (XPRISM's password pages hand off here) |
 | `/workspace?notice=xprism_college_inactive` · `notice=xprism_account_disabled` | Messages for XPRISM accounts that cannot be used |
-| `/coming-soon?app=<id>[&state=maintenance]` | Phase 2 holding page (Caddy also serves it on Phase 2 hosts) and the maintenance page for gated spokes |
+| `/maintenance?app=<id>` | Maintenance page for gated spokes (in `MAINTENANCE`, or when Caddy cannot reach the container) |
 | `/pricing[?plan=<code>][#institutional]` | Licences and checkout (Module 4); `?plan=` resumes a purchase after sign-in |
 | `/advisory-board` · `/contact[?topic=<category>]` | Advisory board and contact form (Module 4) |
 | `/workspace/billing[?status=success]` | Licences, invoices and GST billing details; Stripe's success URL returns here (Module 5) |

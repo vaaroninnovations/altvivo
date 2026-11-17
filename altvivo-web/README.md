@@ -6,15 +6,15 @@ Next.js 16 (App Router, React 19, Tailwind 4), served by `altvivo-web:3000` behi
 
 | Route | What it does | Data |
 |---|---|---|
-| `/` | Hero, the flagship products (XPRISM, aMaze) with live "from" prices, platform pillars, the Phase 2 pipeline with early-access waitlists, the featured Scientific Advisory Board, institutions | `GET /v1/public/apps`, `plans`, `advisory-board?featured=1` |
+| `/` | Hero, the flagship products (XPRISM, aMaze) with live "from" prices, platform pillars, the featured Scientific Advisory Board, institutions | `GET /v1/public/apps`, `plans`, `advisory-board?featured=1` |
 | `/advisory-board` | Published advisory board: portrait, credentials, designation, affiliation, specialisations, ORCID / Scholar / LinkedIn / website, bio dialog | `GET /v1/public/advisory-board` (managed in `/admin`) |
 | `/pricing` | Currency switch (INR via Razorpay, USD via Stripe), monthly / annual, single-app and Dual-Suite cards, site-licence seat calculator with GST, proforma PDF for institution admins or a quotation request, comparison, FAQ | `GET /v1/public/plans`; checkout below |
 | `/free-month` | "One month free" request form (name, institution, role, applications, use case); a signed-in visitor sees where their own request stands. The site-wide announcement bar (`components/trial.tsx`) links here | `GET /v1/public/trial-offer`, `POST /v1/public/trial-request` |
 | `/privacy`, `/terms`, `/cookies` | Privacy Policy (DPDPA 2023 + GDPR, Grievance Officer), Terms & Conditions (licences, seats, no sharing, research disclaimers, IP, GST, refunds `#refunds`, Indian jurisdiction), Cookie Policy (every cookie and storage key) | legal identity from `LEGAL_*` / `SELLER_*` env, read per request |
 | `/contact` | Contact form (`?topic=institutional` etc.) | `POST /v1/public/contact` |
-| `/coming-soon?app=` | Phase 2 holding page and maintenance page (Caddy routes Phase 2 hosts here) | registry |
+| `/maintenance?app=` | Maintenance page (the paid gate and Caddy send visitors here while an app is down or in maintenance) | registry |
 | `/login`, `/register` | Sign-in (password, Google, TOTP step `/login/mfa`) and registration. Both honour `?redirect=` (the paid gate's parameter) and `?next=` | `/v1/auth/*` |
-| `/workspace` | My Applications: each app shows "Active licence" with Launch, or "Locked — upgrade required" with one-click checkout; renewal warnings, pipeline waitlists, data vault | `/v1/api/workspace`, `/v1/auth/session` |
+| `/workspace` | My Applications: each app shows "Active licence" with Launch, or "Locked — upgrade required" with one-click checkout; renewal warnings, data vault | `/v1/api/workspace`, `/v1/auth/session` |
 | `/workspace/upgrade?app=&reason=` | Where the paid gate sends unlicensed users: explains the reason, offers the app plan or the Dual-Suite bundle | `/v1/public/plans`, checkout |
 | `/workspace/billing` | Licences in force (renew, stop auto-renew), bundle upgrade, tax invoice PDFs, payments, personal and institution GST billing details | `/v1/api/billing/*` |
 | `/workspace/security` | Profile, affiliation, ORCID, password, TOTP enrolment and recovery codes, sessions and sign-out everywhere (`/workspace/account` redirects here) | `/v1/api/account/*`, `/v1/auth/mfa/*` |
@@ -23,7 +23,7 @@ Next.js 16 (App Router, React 19, Tailwind 4), served by `altvivo-web:3000` behi
 | `/admin/licences` | All manual (offline NEFT / RTGS / PO / complimentary) licences: change expiry, revoke | `/v1/api/admin/licences*` |
 | `/admin/institutions`, `/admin/institutions/[id]` | Tenants: seat limit, whitelisted domains, status, GST billing profile, members, institution licences, proformas and invoices with "record bank payment" | `/v1/api/admin/organizations*`, `invoices*` |
 | `/admin/invoices`, `/admin/payments` | Every tax invoice, proforma and credit note (PDF, record payment, credit note, cancel); every Razorpay / Stripe / bank payment | `/v1/api/admin/invoices*`, `payments` |
-| `/admin/apps` | App switchboard (LIVE / BETA / MAINTENANCE / COMING_SOON, version, notify waitlist) and plan price editor | `/v1/api/admin/apps*`, `plans*` |
+| `/admin/apps` | App switchboard (LIVE / BETA / MAINTENANCE, version) and plan price editor | `/v1/api/admin/apps*`, `plans*` |
 | `/admin/advisory` | Advisory board CMS: create, edit, publish / hide, feature, reorder, delete, portrait upload (SHA-256 presigned PUT) | `/v1/api/admin/advisory-board*` |
 | `/admin/mail` | SuperAdmin mailbox: Inbox (contact enquiries, free-month requests, forwarded replies), Starred, Sent, Drafts, Trash; conversation view, compose / reply / forward, save draft, search, unread filter, bulk read / star / trash / restore / delete, empty trash | `/v1/api/admin/mail*` |
 | `/admin/trials` | Free-month requests: approve (TOTP-signed, 1 to 90 days) or decline; shows whether the address already has a verified account | `/v1/api/admin/trials*` |

@@ -3,8 +3,7 @@
 // migrations (and runnable alone: `node db/seed/seed.ts`).
 // -----------------------------------------------------------------------------
 //   * audit chain head (genesis) - created once, never changed
-//   * app_registry: xprism + amaze LIVE; pharmadme, stat, phytonet, mira
-//     COMING_SOON. Re-running refreshes catalogue copy but NEVER touches
+//   * app_registry: xprism + amaze LIVE. Re-running refreshes catalogue copy but NEVER touches
 //     status / version, which the SUPERADMIN switchboard owns.
 //   * plans + plan_entitlements: created when missing. Prices and app lists
 //     edited later in /admin are never overwritten.
@@ -24,7 +23,7 @@ type AppSeed = {
   name: string;
   tagline: string;
   description: string;
-  status: 'LIVE' | 'COMING_SOON';
+  status: 'LIVE';
   version: string;
   requiresCredits: boolean;
   phase: number;
@@ -85,62 +84,6 @@ export const APPS: readonly AppSeed[] = [
       'Open field, EPM, Y-maze, MWM',
       'CSV / JSON export',
     ],
-  },
-  {
-    appId: 'pharmadme',
-    name: 'PharmADME',
-    tagline: '3D Multi-Compartment Human PK/ADME Simulator',
-    description:
-      'Physiologically based multi-compartment simulation of absorption, distribution, metabolism and excretion in a 3D human model.',
-    status: 'COMING_SOON',
-    version: '0.0.0',
-    requiresCredits: true,
-    phase: 2,
-    sortOrder: 30,
-    iconKey: 'pill',
-    highlights: ['Multi-compartment PBPK', '3D organ visualisation', 'Dose-regimen what-ifs'],
-  },
-  {
-    appId: 'stat',
-    name: "Stat 'O' Mate AI",
-    tagline: 'Life Sciences Biostatistics Platform',
-    description:
-      'AI-guided test selection, assumption checks and publication-ready statistical reporting for preclinical and clinical datasets.',
-    status: 'COMING_SOON',
-    version: '0.0.0',
-    requiresCredits: true,
-    phase: 2,
-    sortOrder: 40,
-    iconKey: 'sigma',
-    highlights: ['Guided test selection', 'Assumption diagnostics', 'Publication-ready tables & figures'],
-  },
-  {
-    appId: 'phytonet',
-    name: 'PhytoNet AI',
-    tagline: 'Network Pharmacology & Molecular Docking',
-    description:
-      'From phytochemical to target network: compound-target-pathway graphs with integrated molecular docking.',
-    status: 'COMING_SOON',
-    version: '0.0.0',
-    requiresCredits: true,
-    phase: 2,
-    sortOrder: 50,
-    iconKey: 'leaf',
-    highlights: ['Compound-target-pathway networks', 'Integrated molecular docking', 'Enrichment analysis'],
-  },
-  {
-    appId: 'mira',
-    name: 'MIRA',
-    tagline: 'Automated Manuscript Screening & Reference Verification',
-    description:
-      'Screens manuscripts for reporting-guideline gaps and verifies every reference against bibliographic databases.',
-    status: 'COMING_SOON',
-    version: '0.0.0',
-    requiresCredits: true,
-    phase: 2,
-    sortOrder: 60,
-    iconKey: 'file-search',
-    highlights: ['ARRIVE / CONSORT checklist screening', 'Reference existence & retraction checks', 'Citation formatting'],
   },
 ];
 

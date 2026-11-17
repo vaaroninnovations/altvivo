@@ -23,7 +23,7 @@ db/
 | Group | Tables |
 |---|---|
 | Identity | `users` (role adds `ADVISORY_BOARD`), `organizations` (institutional tenants: kind, status, seat limit, domain whitelist), `oauth_accounts`, `auth_sessions`, `refresh_tokens`, `auth_tokens`, `mfa_recovery_codes` |
-| Spokes | `app_registry` (switchboard), `app_waitlist` (Phase 2 pipeline) |
+| Spokes | `app_registry` (switchboard: `LIVE`, `BETA`, `MAINTENANCE`); `app_waitlist` is retired and empty |
 | Billing | `plans`, `plan_entitlements`, `subscriptions`, `app_entitlements`, `billing_profiles`, `payments`, `invoices`, `invoice_lines`, `invoice_series`, `billing_events` |
 | Site content | `advisory_board_members`, `contact_messages`, `consent_records` |
 | Credits | `credit_accounts`, `credit_ledger` |
@@ -44,7 +44,6 @@ There is no free tier and no trial. `user_access_claims(user_id [, at])` returns
 | Manual licence by a SUPERADMIN (NEFT / RTGS / PO) | `manual` (user) or `institution` (org) | not revoked and `starts_at ≤ now < expires_at` |
 
 - **Never active:**
-  - a `COMING_SOON` app;
   - a disabled user;
   - a `PENDING`, `CANCELED` or `EXPIRED` subscription;
   - a `PAST_DUE` subscription past its paid period (no grace).
@@ -127,7 +126,7 @@ The ledger is unchanged. Insert `{user_id | org_id, app_id, action_type, delta, 
 Idempotent, one serializable transaction, run by `db:deploy` (or alone with `npm run db:seed`). It is plain TypeScript run natively by Node ≥ 22.18.
 
 - **Audit genesis.** Created once. A run with a different `AUDIT_CHAIN_GENESIS` fails.
-- **App registry.** `xprism` and `amaze` are seeded `LIVE`; `pharmadme`, `stat`, `phytonet` and `mira` are seeded `COMING_SOON`. Re-runs refresh the catalogue copy but never the status or version.
+- **App registry.** `xprism` and `amaze` are seeded `LIVE` (the only applications). The old `COMING_SOON` status is refused by `app_registry_no_coming_soon_chk`. Re-runs refresh the catalogue copy but never the status or version.
 - **Price list.** Created only when a plan is missing, so later `/admin` edits survive. Prices exclude GST; SAC 997331, 18 %.
 
 | Plan | Kind | INR | USD |

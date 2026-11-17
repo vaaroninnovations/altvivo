@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { BellRing, Pencil } from "lucide-react";
+import { Pencil } from "lucide-react";
 import { LoadState, PageHeader, Table, useAdmin, useSigner } from "@/components/admin/kit";
 import { Dialog, Switch } from "@/components/client";
 import { Alert, Button, Card, Field, Pill, StatusBadge, formatDate } from "@/components/ui";
@@ -36,7 +36,6 @@ const STATUSES: { value: AppStatus; label: string; help: string }[] = [
   { value: "LIVE", label: "Live", help: "Licensed users can launch it." },
   { value: "BETA", label: "Beta", help: "Licensed users can launch it; marked as beta." },
   { value: "MAINTENANCE", label: "Maintenance", help: "Gate refuses everyone except VIPs; users see a maintenance notice." },
-  { value: "COMING_SOON", label: "Coming soon", help: "Not launchable; visitors can join the waitlist." },
 ];
 
 export function AppsView() {
@@ -55,7 +54,7 @@ export function AppsView() {
           {STATUSES.find((s) => s.value === status)!.help} Every signed-in user&apos;s token is refreshed so the change applies within seconds.
         </>
       ),
-      danger: status === "MAINTENANCE" || status === "COMING_SOON",
+      danger: status === "MAINTENANCE",
       run: async ({ totpCode, reason }) => {
         await api(`/v1/api/admin/apps/${a.appId}`, { method: "PATCH", body: { status, reason, totpCode } });
         setNotice(`${a.name} is now ${status.replace("_", " ").toLowerCase()}.`);
@@ -75,18 +74,6 @@ export function AppsView() {
       },
     });
   };
-
-  const notify = (a: AdminApp) =>
-    sign({
-      title: `Email ${a.waitlistPendingNotification} waitlisted ${a.waitlistPendingNotification === 1 ? "person" : "people"} about ${a.name}`,
-      description: "Each address is emailed once; the link goes to the app's pricing.",
-      defaultReason: `${a.name} launch announcement`,
-      run: async ({ totpCode, reason }) => {
-        const r = await api<{ sent: number; failed: number }>(`/v1/api/admin/apps/${a.appId}/notify-waitlist`, { method: "POST", body: { reason, totpCode } });
-        setNotice(`Waitlist notified: ${r.sent} sent${r.failed ? `, ${r.failed} failed (retry later)` : ""}.`);
-        void apps.reload();
-      },
-    });
 
   return (
     <>
@@ -129,7 +116,7 @@ export function AppsView() {
                 ))}
               </div>
               <p className="text-xs text-subtle">
-                Status changed {formatDate(a.statusChangedAt, true)}. Waitlist: {a.waitlistTotal} total, {a.waitlistPendingNotification} not yet notified.
+                Status changed {formatDate(a.statusChangedAt, true)}.
               </p>
               <div className="flex flex-wrap items-end gap-2 border-t border-line pt-4">
                 <div className="flex-1">
@@ -145,9 +132,6 @@ export function AppsView() {
                 </div>
                 <Button variant="outline" disabled={!/^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$/.test((versions[a.appId] ?? "").trim())} onClick={() => changeVersion(a)}>
                   Save version
-                </Button>
-                <Button variant="ghost" disabled={!a.waitlistPendingNotification || (a.status !== "LIVE" && a.status !== "BETA")} onClick={() => notify(a)}>
-                  <BellRing className="size-4" aria-hidden /> Notify waitlist
                 </Button>
               </div>
             </Card>

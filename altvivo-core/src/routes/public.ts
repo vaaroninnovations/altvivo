@@ -13,13 +13,6 @@ import { deliverToInbox } from '../services/mailbox.js';
 import { listApps } from '../services/registry.js';
 import { toApiTrial, trialAppIds } from '../services/trials.js';
 
-const WaitlistBody = z.object({
-  email: z.string().trim().toLowerCase().email().max(254),
-  appId: z.string().regex(/^[a-z][a-z0-9]{1,31}$/),
-  turnstileToken: z.string().min(1).max(2048),
-  source: z.enum(['web', 'coming-soon', 'topbar']).default('web'),
-});
-
 export const CONTACT_CATEGORIES = ['sales', 'institutional', 'support', 'billing', 'partnership', 'press', 'privacy', 'other'] as const;
 
 /** Labels used by spoke contact forms (e.g. aMaze) mapped to routing categories. */
@@ -162,27 +155,6 @@ export default async function publicRoutes(app: FastifyInstance, d: Deps) {
     });
     reply.header('Cache-Control', 'public, max-age=120, stale-while-revalidate=600');
     return { members };
-  });
-
-  /** Anonymous early-access sign-up (landing page modal, coming-soon pages). */
-  app.post('/v1/public/waitlist', { config: { rateLimit: 'auth' } }, async (req, reply) => {
-    const body = parse(WaitlistBody, req.body);
-    if (!(await d.turnstile.verify(body.turnstileToken, req.clientIp))) {
-      throw badRequest('TURNSTILE_FAILED', 'Human verification failed, please retry');
-    }
-    const appRow = await d.prisma.appRegistry.findUnique({ where: { appId: body.appId }, select: { status: true } });
-    if (!appRow) throw badRequest('UNKNOWN_APP', 'Unknown application');
-    if (appRow.status === 'LIVE') throw badRequest('APP_ALREADY_LIVE', 'This application is already available');
-    const existingUser = await d.prisma.user.findUnique({ where: { email: body.email }, select: { id: true } });
-    await withAudit(d.prisma, actorOf(req), async (tx) => {
-      const res = await tx.appWaitlist.createMany({
-        data: [{ email: body.email, appId: body.appId, source: body.source, userId: existingUser?.id ?? null }],
-        skipDuplicates: true,
-      });
-      if (res.count) await audit(tx, 'WAITLIST.JOIN', body.appId, { source: body.source, anonymous: true });
-    });
-    // Same answer for new and repeat sign-ups (no enumeration of who is listed).
-    return reply.code(202).send({ status: 'on_waitlist', appId: body.appId });
   });
 
   /**

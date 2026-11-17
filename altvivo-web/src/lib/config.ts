@@ -29,5 +29,5 @@ export function safeNext(raw: string | null | undefined, fallback = "/workspace"
   }
 }
 
-/** Absolute URL on the portal (needed on phase-2 subdomains, where relative links would stay on the subdomain). */
+/** Absolute URL on the portal (needed on pages served under an app subdomain, where relative links would stay there). */
 export const portal = (path: string) => `${siteOrigin}${path.startsWith("/") ? path : `/${path}`}`;

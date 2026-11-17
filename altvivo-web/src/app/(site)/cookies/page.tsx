@@ -29,7 +29,7 @@ const NECESSARY: Row[] = [
   ["altvivo_oauth", "api.altvivo.bio, sign-in paths only", "Binds a Google or ORCID sign-in to your browser to prevent login forgery. Deleted when sign-in completes.", "10 minutes"],
   ["altvivo_consent", "altvivo.bio, for .altvivo.bio", "Records your cookie choices so every AltVivo application can honour them, with a random identifier linking to our consent record.", "12 months"],
   ["sessionid, csrftoken", "xprism.altvivo.bio", "XPRISM's own session and form-protection cookies, created after AltVivo has signed you in.", "10 hours (sessionid), 1 year (csrftoken)"],
-  ["__cf_bm, cf_clearance", "Cloudflare, on AltVivo hosts", "Bot protection for our network and the human check (Turnstile) on sign-in, sign-up and waitlist forms.", "30 minutes – 1 year"],
+  ["__cf_bm, cf_clearance", "Cloudflare, on AltVivo hosts", "Bot protection for our network and the human check (Turnstile) on sign-in, sign-up and contact forms.", "30 minutes – 1 year"],
 ];
 
 export default function CookiesPage() {

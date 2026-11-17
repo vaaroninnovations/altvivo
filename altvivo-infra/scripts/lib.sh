@@ -12,7 +12,7 @@ UID_APP=10001      # caddy, altvivo-core, altvivo-web, spokes
 UID_REDIS=999
 GID_REDIS=1000
 
-KNOWN_APPS=(xprism amaze pharmadme stat phytonet mira)
+KNOWN_APPS=(xprism amaze)
 
 log()  { printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 warn() { printf '[%s] WARN: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2; }

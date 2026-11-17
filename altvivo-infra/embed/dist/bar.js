@@ -1,5 +1,5 @@
 /*!
- * <altvivo-topbar> v1.2.0 - shared AltVivo bar for every *.altvivo.bio app.
+ * <altvivo-topbar> v1.3.0 - shared AltVivo bar for every *.altvivo.bio app.
  * Zero dependencies. Waffle app switcher with licence status (licensed /
  * locked -> upgrade), live credit balance, account menu, silent session
  * refresh and cross-tab sign-out.
@@ -26,7 +26,7 @@
   "use strict";
   if (typeof window === "undefined" || !window.customElements || customElements.get("altvivo-topbar")) return;
 
-  const VERSION = "1.2.0";
+  const VERSION = "1.3.0";
   const CHANNEL = "altvivo-session";
   const VIP_ROLES = new Set(["SUPERADMIN", "ADVISORY_BOARD"]);
   // The AltVivo wordmark (light / dark), inlined by build.mjs from src/logos/.
@@ -39,10 +39,6 @@
     grid: ["M4 4h4v4H4z", "M10 4h4v4h-4z", "M16 4h4v4h-4z", "M4 10h4v4H4z", "M10 10h4v4h-4z", "M16 10h4v4h-4z", "M4 16h4v4H4z", "M10 16h4v4h-4z", "M16 16h4v4h-4z"],
     "flask-conical": ["M10 2v7.31L4.5 19.5A1.5 1.5 0 0 0 5.8 22h12.4a1.5 1.5 0 0 0 1.3-2.5L14 9.31V2", "M8.5 2h7", "M7 16h10"],
     "scan-eye": ["M3 7V5a2 2 0 0 1 2-2h2", "M17 3h2a2 2 0 0 1 2 2v2", "M21 17v2a2 2 0 0 1-2 2h-2", "M7 21H5a2 2 0 0 1-2-2v-2", "M5 12s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z", "M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"],
-    pill: ["m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7z", "m8.5 8.5 7 7"],
-    sigma: ["M18 7V4H6l6 8-6 8h12v-3"],
-    leaf: ["M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z", "M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"],
-    "file-search": ["M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4", "M14 2v6h6", "M20 8v3", "M16.5 18.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z", "m21 22-2.7-2.7"],
     box: ["M21 8 12 3 3 8v8l9 5 9-5z", "M3 8l9 5 9-5", "M12 13v8"],
     zap: ["M13 2 3 14h9l-1 8 10-12h-9l1-8z"],
     lock: ["M5 11h14v10H5z", "M8 11V7a4 4 0 0 1 8 0v4"],
@@ -86,7 +82,7 @@
   // ---------------------------------------------------------------- styles --
   const CSS = `
 :host { --av-bg:#ffffff; --av-fg:#0B0F19; --av-muted:#64748B; --av-line:#E2E8F0; --av-soft:#F1F5F9;
-  --av-accent:#0EA5E9; --av-accent-ink:#0369A1; --av-live:#10B981; --av-soon:#F59E0B; --av-shadow:0 12px 32px rgba(15,23,42,.14);
+  --av-accent:#0EA5E9; --av-accent-ink:#0369A1; --av-live:#10B981; --av-warn:#F59E0B; --av-shadow:0 12px 32px rgba(15,23,42,.14);
   display:block; position:sticky; top:0; z-index:2147483000; font-family:"Plus Jakarta Sans",Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   font-size:14px; line-height:1.3; color:var(--av-fg); -webkit-font-smoothing:antialiased; }
 :host([sticky="false"]) { position:relative; }
@@ -141,14 +137,12 @@ button { font:inherit; color:inherit; background:none; border:0; cursor:pointer;
 .tile .ic { width:32px; height:32px; border-radius:9px; display:grid; place-items:center; background:var(--av-soft); color:var(--av-accent-ink); }
 .tile .nm { font-weight:600; font-size:13.5px; display:flex; align-items:center; gap:6px; }
 .tile .tg { font-size:11.5px; color:var(--av-muted); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-.tile.soon { opacity:.82; }
 .pill { font-family:"JetBrains Mono",ui-monospace,monospace; font-size:9.5px; font-weight:700; letter-spacing:.06em; padding:2px 6px; border-radius:999px;
   border:1px solid currentColor; line-height:1.4; text-transform:uppercase; }
-.pill.soon { color:var(--av-soon); }
 .pill.beta { color:var(--av-accent); }
 .pill.live { color:var(--av-live); }
 .pill.maint { color:var(--av-muted); }
-.pill.lock { color:var(--av-soon); display:inline-flex; align-items:center; gap:3px; }
+.pill.lock { color:var(--av-warn); display:inline-flex; align-items:center; gap:3px; }
 .pill.vip { color:var(--av-accent); }
 .tile.locked .ic { color:var(--av-muted); }
 .badge { position:absolute; top:10px; right:10px; }
@@ -164,7 +158,7 @@ button { font:inherit; color:inherit; background:none; border:0; cursor:pointer;
 .mi { display:flex; width:100%; text-align:left; padding:9px 10px; border-radius:8px; font-size:13.5px; }
 .mi:hover, .mi:focus-visible { background:var(--av-soft); }
 .mi.danger { color:#DC2626; }
-.warn { margin:0 0 8px; padding:8px 10px; border-radius:8px; font-size:12px; background:color-mix(in srgb, var(--av-soon) 14%, transparent); }
+.warn { margin:0 0 8px; padding:8px 10px; border-radius:8px; font-size:12px; background:color-mix(in srgb, var(--av-warn) 14%, transparent); }
 .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
 @media (max-width: 560px) {
   .current, .brand .word, .sep { display:none; } .credits .lbl { display:none; }
@@ -446,31 +440,29 @@ button { font:inherit; color:inherit; background:none; border:0; cursor:pointer;
       const panel = el("div", { class: "panel waffle", id: "av-apps", role: "dialog", "aria-label": "AltVivo apps", hidden: this._open !== "apps" });
       const ents = this._user?.entitlements || {};
       const live = this._apps.filter((a) => a.status === "LIVE" || a.status === "BETA" || a.status === "MAINTENANCE");
-      const soon = this._apps.filter((a) => a.status === "COMING_SOON");
       if (!this._apps.length) panel.append(el("p", { class: "warn", text: "Apps are unavailable right now. Please retry shortly." }));
 
-      const section = (title, list, isSoon) => {
+      const section = (title, list) => {
         if (!list.length) return;
         panel.append(el("p", { class: "ptitle", text: title }));
         const grid = el("div", { class: "grid", role: "list" });
         for (const a of list) {
           const isCurrent = a.appId === this.appId;
           const licence = this._licence(a.appId, ents);
-          const locked = !isSoon && this._user && licence === "locked";
+          const locked = this._user && licence === "locked";
           // Locked apps go straight to the upgrade page instead of bouncing off the paid gate.
           const href = locked ? this._upgradeUrl(a.appId) : trustedUrl(a.url, this.home);
           const tile = el(href ? "a" : "div", {
-            class: `tile${isSoon ? " soon" : ""}${locked ? " locked" : ""}`, role: "listitem", href: href || undefined,
+            class: `tile${locked ? " locked" : ""}`, role: "listitem", href: href || undefined,
             "aria-current": isCurrent ? "page" : undefined,
-            "aria-label": `${a.name}${isSoon ? ", coming soon" : ""}${locked ? ", locked, upgrade required" : ""}${isCurrent ? ", current app" : ""}`,
+            "aria-label": `${a.name}${locked ? ", locked, upgrade required" : ""}${isCurrent ? ", current app" : ""}`,
           });
           tile.append(el("span", { class: "ic" }, icon(a.iconKey, 18)));
           const name = el("span", { class: "nm", text: a.name });
           if (a.status === "BETA") name.append(el("span", { class: "pill beta", text: "Beta" }));
           tile.append(name, el("span", { class: "tg", text: a.tagline || "" }));
           let badge = null;
-          if (isSoon) badge = el("span", { class: "pill soon", text: "Soon" });
-          else if (a.status === "MAINTENANCE") badge = el("span", { class: "pill maint", text: "Maint." });
+          if (a.status === "MAINTENANCE") badge = el("span", { class: "pill maint", text: "Maint." });
           else if (this._user && licence === "vip") badge = el("span", { class: "pill vip", text: "VIP" });
           else if (this._user && licence === "licensed") badge = el("span", { class: "pill live", text: "Licensed" });
           else if (this._user) badge = el("span", { class: "pill lock" }, icon("lock", 10), document.createTextNode("Locked"));
@@ -479,8 +471,7 @@ button { font:inherit; color:inherit; background:none; border:0; cursor:pointer;
         }
         panel.append(grid);
       };
-      section("Available now", live, false);
-      section("Coming soon", soon, true);
+      section("Applications", live);
       const foot = el("div", { class: "foot" }, el("span", { text: `v${VERSION}` }),
         el("a", { href: `${this.home}/workspace` }, document.createTextNode("Open workspace"), icon("external", 13)));
       panel.append(foot);

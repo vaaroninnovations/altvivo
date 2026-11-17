@@ -1,4 +1,4 @@
-export type AppStatus = "LIVE" | "BETA" | "COMING_SOON" | "MAINTENANCE";
+export type AppStatus = "LIVE" | "BETA" | "MAINTENANCE";
 export type Role = "STUDENT" | "RESEARCHER" | "PI" | "INSTITUTE_ADMIN" | "ADVISORY_BOARD" | "SUPERADMIN";
 
 export interface PublicApp {
@@ -149,7 +149,6 @@ export interface SessionUser {
 export interface WorkspaceApp extends PublicApp {
   entitlement: ApiEntitlement;
   upgradeUrl: string;
-  onWaitlist: boolean;
 }
 
 /** A person's "one month free" request (GET /v1/api/workspace, POST /v1/public/trial-request). */
@@ -214,6 +213,4 @@ export interface PaymentRow {
 export interface AdminApp extends PublicApp {
   statusChangedAt: string;
   statusChangedBy: string | null;
-  waitlistTotal: number;
-  waitlistPendingNotification: number;
 }

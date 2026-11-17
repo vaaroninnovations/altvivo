@@ -67,6 +67,8 @@ enum OrganizationStatus {
 enum AppStatus {
   LIVE
   BETA
+  /// Retired 2026-11-17: no app may hold it (app_registry_no_coming_soon_chk).
+  /// Kept only because database functions still compare against the label.
   COMING_SOON
   MAINTENANCE
 
@@ -427,14 +429,13 @@ model MfaRecoveryCode {
 
 /// Spoke switchboard. `status` is flipped by a SUPERADMIN at /admin; the
 /// trigger stamps who/when and the row-change audit records the flip.
-/// A COMING_SOON app never resolves to active access, even with a grant.
 model AppRegistry {
   appId           String    @id @map("app_id") @db.VarChar(32)
   name            String    @db.VarChar(100)
   tagline         String    @db.VarChar(200)
   description     String
   subdomainUrl    String    @unique @map("subdomain_url") @db.VarChar(255)
-  status          AppStatus @default(COMING_SOON)
+  status          AppStatus @default(MAINTENANCE)
   version         String    @default("0.0.0") @db.VarChar(32)
   requiresCredits Boolean   @default(false) @map("requires_credits")
   phase           Int       @default(1) @db.SmallInt
@@ -458,7 +459,7 @@ model AppRegistry {
   @@map("app_registry")
 }
 
-/// Phase 2 pipeline waitlist (/coming-soon). Joining never grants access.
+/// Former launch waitlist for unlaunched apps. Retired with COMING_SOON; kept empty for history.
 model AppWaitlist {
   id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId     String?   @map("user_id") @db.Uuid

@@ -12,10 +12,6 @@
 #                  ├── postgres 16
 #                  └── redis 7
 #
-# Phase-2 spokes (pharmadme, stat, phytonet, mira) are commented out at the
-# bottom of this file. Until enabled, Caddy routes their subdomains to the
-# altvivo-web "Launching Soon" page (see caddy/coming-soon.caddy).
-#
 # Usage (from this directory on the VPS):
 #   sudo ./scripts/generate-secrets.sh        # once
 #   docker compose build
@@ -284,7 +280,7 @@ services:
       TRUSTED_PROXY_CIDRS: ${APP_SUBNET:-172.30.0.0/24}
       PUBLIC_API_URL: https://api.altvivo.bio
       PUBLIC_WEB_URL: https://altvivo.bio
-      ALLOWED_ORIGINS: https://altvivo.bio,https://xprism.altvivo.bio,https://amaze.altvivo.bio,https://pharmadme.altvivo.bio,https://stat.altvivo.bio,https://phytonet.altvivo.bio,https://mira.altvivo.bio
+      ALLOWED_ORIGINS: https://altvivo.bio,https://xprism.altvivo.bio,https://amaze.altvivo.bio
       COOKIE_DOMAIN: .altvivo.bio
       DATABASE_URL: postgresql://core_app:${CORE_APP_PASSWORD}@postgres:5432/db_core?schema=public&connection_limit=${CORE_DB_POOL_SIZE:-20}
       REDIS_URL: redis://core:${REDIS_CORE_PASSWORD}@redis:6379/0
@@ -565,141 +561,6 @@ services:
         limits:
           cpus: "0.5"
           memory: 128M
-
-  # ===========================================================================
-  # PHASE-2 PLUG-AND-PLAY SPOKES (disabled)
-  # ---------------------------------------------------------------------------
-  # To launch a spoke (example: pharmadme):
-  #   1. Add its secrets to .env (PHARMADME_DB_PASSWORD, REDIS_PHARMADME_PASSWORD,
-  #      PHARMADME_SERVICE_TOKEN) - `sudo ./scripts/generate-secrets.sh --spoke pharmadme`
-  #   2. ./scripts/provision-spoke-db.sh pharmadme      (role + database)
-  #   3. Append ",pharmadme:${PHARMADME_SERVICE_TOKEN}" to SPOKE_SERVICE_TOKENS
-  #      on altvivo-core above.
-  #   4. Uncomment the service block below and `docker compose up -d pharmadme`.
-  #   5. ./scripts/spoke-route.sh enable pharmadme       (Caddy upstream, hot reload)
-  #   6. Flip app_registry.status to BETA/LIVE in /workspace/admin/apps.
-  # Until step 5, Caddy keeps serving the "Launching Soon" page for that host.
-  # ===========================================================================
-
-  # pharmadme:
-  #   <<: *hardening
-  #   image: ${PHARMADME_IMAGE:-altvivo/pharmadme:latest}
-  #   build:
-  #     context: ${PHARMADME_BUILD_CONTEXT:-../spokes/pharmadme}
-  #   container_name: altvivo-pharmadme
-  #   user: "10001:10001"
-  #   environment:
-  #     <<: *spoke-sso-env
-  #     ALTVIVO_APP_ID: pharmadme
-  #     ALTVIVO_SERVICE_TOKEN: ${PHARMADME_SERVICE_TOKEN}
-  #     PORT: "8000"
-  #     DATABASE_URL: postgres://pharmadme:${PHARMADME_DB_PASSWORD}@postgres:5432/pharmadme
-  #     REDIS_URL: redis://pharmadme:${REDIS_PHARMADME_PASSWORD}@redis:6379/0
-  #     REDIS_KEY_PREFIX: "pharmadme:"
-  #   tmpfs:
-  #     - /tmp:size=256m,mode=1777
-  #   networks: [altvivo_net, altvivo_data]
-  #   depends_on:
-  #     altvivo-core:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD", "python", "-c", "import urllib.request as u,sys;r=u.Request('http://127.0.0.1:8000/altvivo/healthz',headers={'Host':'pharmadme.altvivo.bio','X-Forwarded-Proto':'https'});sys.exit(0 if u.urlopen(r,timeout=4).status==200 else 1)"]
-  #     interval: 20s
-  #     timeout: 5s
-  #     retries: 4
-  #   deploy:
-  #     resources:
-  #       limits: {cpus: "2.0", memory: 2G}
-
-  # stat:
-  #   <<: *hardening
-  #   image: ${STAT_IMAGE:-altvivo/stat:latest}
-  #   build:
-  #     context: ${STAT_BUILD_CONTEXT:-../spokes/stat}
-  #   container_name: altvivo-stat
-  #   user: "10001:10001"
-  #   environment:
-  #     <<: *spoke-sso-env
-  #     ALTVIVO_APP_ID: stat
-  #     ALTVIVO_SERVICE_TOKEN: ${STAT_SERVICE_TOKEN}
-  #     PORT: "8000"
-  #     DATABASE_URL: postgres://stat:${STAT_DB_PASSWORD}@postgres:5432/stat
-  #     REDIS_URL: redis://stat:${REDIS_STAT_PASSWORD}@redis:6379/0
-  #     REDIS_KEY_PREFIX: "stat:"
-  #   tmpfs:
-  #     - /tmp:size=256m,mode=1777
-  #   networks: [altvivo_net, altvivo_data]
-  #   depends_on:
-  #     altvivo-core:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD", "python", "-c", "import urllib.request as u,sys;r=u.Request('http://127.0.0.1:8000/altvivo/healthz',headers={'Host':'stat.altvivo.bio','X-Forwarded-Proto':'https'});sys.exit(0 if u.urlopen(r,timeout=4).status==200 else 1)"]
-  #     interval: 20s
-  #     timeout: 5s
-  #     retries: 4
-  #   deploy:
-  #     resources:
-  #       limits: {cpus: "2.0", memory: 2G}
-
-  # phytonet:
-  #   <<: *hardening
-  #   image: ${PHYTONET_IMAGE:-altvivo/phytonet:latest}
-  #   build:
-  #     context: ${PHYTONET_BUILD_CONTEXT:-../spokes/phytonet}
-  #   container_name: altvivo-phytonet
-  #   user: "10001:10001"
-  #   environment:
-  #     <<: *spoke-sso-env
-  #     ALTVIVO_APP_ID: phytonet
-  #     ALTVIVO_SERVICE_TOKEN: ${PHYTONET_SERVICE_TOKEN}
-  #     PORT: "8000"
-  #     DATABASE_URL: postgres://phytonet:${PHYTONET_DB_PASSWORD}@postgres:5432/phytonet
-  #     REDIS_URL: redis://phytonet:${REDIS_PHYTONET_PASSWORD}@redis:6379/0
-  #     REDIS_KEY_PREFIX: "phytonet:"
-  #   tmpfs:
-  #     - /tmp:size=1g,mode=1777   # docking scratch space
-  #   networks: [altvivo_net, altvivo_data]
-  #   depends_on:
-  #     altvivo-core:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD", "python", "-c", "import urllib.request as u,sys;r=u.Request('http://127.0.0.1:8000/altvivo/healthz',headers={'Host':'phytonet.altvivo.bio','X-Forwarded-Proto':'https'});sys.exit(0 if u.urlopen(r,timeout=4).status==200 else 1)"]
-  #     interval: 20s
-  #     timeout: 5s
-  #     retries: 4
-  #   deploy:
-  #     resources:
-  #       limits: {cpus: "4.0", memory: 4G}
-
-  # mira:
-  #   <<: *hardening
-  #   image: ${MIRA_IMAGE:-altvivo/mira:latest}
-  #   build:
-  #     context: ${MIRA_BUILD_CONTEXT:-../spokes/mira}
-  #   container_name: altvivo-mira
-  #   user: "10001:10001"
-  #   environment:
-  #     <<: *spoke-sso-env
-  #     ALTVIVO_APP_ID: mira
-  #     ALTVIVO_SERVICE_TOKEN: ${MIRA_SERVICE_TOKEN}
-  #     PORT: "8000"
-  #     DATABASE_URL: postgres://mira:${MIRA_DB_PASSWORD}@postgres:5432/mira
-  #     REDIS_URL: redis://mira:${REDIS_MIRA_PASSWORD}@redis:6379/0
-  #     REDIS_KEY_PREFIX: "mira:"
-  #   tmpfs:
-  #     - /tmp:size=256m,mode=1777
-  #   networks: [altvivo_net, altvivo_data]
-  #   depends_on:
-  #     altvivo-core:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD", "python", "-c", "import urllib.request as u,sys;r=u.Request('http://127.0.0.1:8000/altvivo/healthz',headers={'Host':'mira.altvivo.bio','X-Forwarded-Proto':'https'});sys.exit(0 if u.urlopen(r,timeout=4).status==200 else 1)"]
-  #     interval: 20s
-  #     timeout: 5s
-  #     retries: 4
-  #   deploy:
-  #     resources:
-  #       limits: {cpus: "2.0", memory: 2G}
 
 # -----------------------------------------------------------------------------
 networks:

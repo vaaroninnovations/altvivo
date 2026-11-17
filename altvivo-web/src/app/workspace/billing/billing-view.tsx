@@ -97,7 +97,7 @@ export function BillingView({
     return () => clearTimeout(t);
   }, [pendingInvoice]);
 
-  const live = data.apps.filter((a) => a.status !== "COMING_SOON");
+  const live = data.apps;
   const activeApps = live.filter((a) => entitled(a.entitlement));
   const inForce = subs.filter((s) => s.inForce);
   const past = subs.filter((s) => !s.inForce);

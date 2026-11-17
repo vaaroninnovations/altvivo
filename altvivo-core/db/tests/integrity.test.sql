@@ -266,7 +266,7 @@ BEGIN
   UPDATE subscriptions SET status = 'ACTIVE', updated_at = now() WHERE id = v_pkg;
   ASSERT (SELECT bool_and(active AND source = 'bundle') FROM user_access_claims(u_solo) WHERE app_id IN ('xprism', 'amaze')),
     'bundle unlocks XPRISM and aMaze';
-  ASSERT NOT (SELECT active FROM user_access_claims(u_solo) WHERE app_id = 'pharmadme'), 'bundle does not reach other apps';
+  ASSERT NOT EXISTS (SELECT 1 FROM user_access_claims(u_solo) WHERE active AND app_id NOT IN ('xprism', 'amaze')), 'bundle does not reach other apps';
 
   -- Institution site licence: verified members of an ACTIVE organization.
   INSERT INTO subscriptions (org_id, provider, external_sub_id, plan_code, status, currency, seats, unit_amount_minor,
@@ -371,23 +371,27 @@ BEGIN
   ASSERT EXISTS (SELECT 1 FROM audit_logs WHERE event_type = 'DB.APP_ENTITLEMENTS.UPDATE' AND resource_id = v::text
                   AND metadata #>> '{changes,revoke_reason,new}' = 'Payment reversed'), 'revocation audited';
 
-  -- Organization-wide manual licence (purchase order) for a Phase 2 app.
-  INSERT INTO app_entitlements (app_id, source, org_id, granted_by, reason, reference, expires_at)
-  VALUES ('mira', 'MANUAL', org, u_admin, 'Pilot under PO TIP/2026/118', 'PO TIP/2026/118', now() + interval '1 year');
-  SELECT * INTO c FROM user_access_claims(u_pi) WHERE app_id = 'mira';
-  ASSERT NOT c.active AND c.source IS NULL, 'a COMING_SOON app never resolves to access';
-  UPDATE app_registry SET status = 'LIVE', version = '1.0.0' WHERE app_id = 'mira';
-  SELECT * INTO c FROM user_access_claims(u_pi) WHERE app_id = 'mira';
-  ASSERT c.active AND c.source = 'institution', 'grant applies once the app launches';
-  ASSERT (SELECT status_changed_by FROM app_registry WHERE app_id = 'mira') = '00000000-0000-4000-8000-0000000000aa',
-    'status change stamped with acting user';
-  ASSERT EXISTS (SELECT 1 FROM audit_logs WHERE event_type = 'DB.APP_REGISTRY.UPDATE' AND resource_id = 'mira'
-                  AND metadata #>> '{changes,status,new}' = 'LIVE'), 'status flip audited';
-  UPDATE app_registry SET status = 'MAINTENANCE' WHERE app_id = 'mira';
-  ASSERT (SELECT active FROM user_access_claims(u_pi) WHERE app_id = 'mira'),
-    'maintenance keeps the paid flag (core decides the maintenance redirect)';
+  -- The retired COMING_SOON status can no longer be set on any app.
+  failed := false;
+  BEGIN UPDATE app_registry SET status = 'COMING_SOON' WHERE app_id = 'amaze';
+  EXCEPTION WHEN check_violation THEN failed := true; END;
+  ASSERT failed, 'COMING_SOON is refused';
 
-  RAISE NOTICE 'PASS manual licences (SUPERADMIN only, expiry, immutable holder, revoke-not-delete), COMING_SOON cap, launch';
+  -- Organization-wide manual licence (purchase order) for aMaze.
+  INSERT INTO app_entitlements (app_id, source, org_id, granted_by, reason, reference, expires_at)
+  VALUES ('amaze', 'MANUAL', org, u_admin, 'Pilot under PO TIP/2026/118', 'PO TIP/2026/118', now() + interval '1 year');
+  SELECT * INTO c FROM user_access_claims(u_pi) WHERE app_id = 'amaze';
+  ASSERT c.active, 'an organization purchase order grants the app';
+  UPDATE app_registry SET status = 'MAINTENANCE' WHERE app_id = 'amaze';
+  ASSERT (SELECT status_changed_by FROM app_registry WHERE app_id = 'amaze') = '00000000-0000-4000-8000-0000000000aa',
+    'status change stamped with acting user';
+  ASSERT EXISTS (SELECT 1 FROM audit_logs WHERE event_type = 'DB.APP_REGISTRY.UPDATE' AND resource_id = 'amaze'
+                  AND metadata #>> '{changes,status,new}' = 'MAINTENANCE'), 'status flip audited';
+  ASSERT (SELECT active FROM user_access_claims(u_pi) WHERE app_id = 'amaze'),
+    'maintenance keeps the paid flag (core decides the maintenance redirect)';
+  UPDATE app_registry SET status = 'LIVE' WHERE app_id = 'amaze';
+
+  RAISE NOTICE 'PASS manual licences (SUPERADMIN only, expiry, immutable holder, revoke-not-delete), retired COMING_SOON, maintenance';
 END;
 $$;
 

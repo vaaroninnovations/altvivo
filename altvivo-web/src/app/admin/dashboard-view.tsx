@@ -13,7 +13,6 @@ interface Dashboard {
   activeLicencesByApp: { appId: string; holders: number; seats: number }[];
   activeSubscriptionsByKind: { kind: string; subs: number; seats: number }[];
   sessions: { active: number; users24h: number };
-  waitlist: { appId: string; total: number; last30Days: number; pendingNotification: number }[];
   revenueLast30Days: { currency: Currency; grossMinor: number; taxMinor: number; refundedMinor: number; netMinor: number; payments: number }[];
   users: { total: number; verified: number; new30: number; disabled: number };
   openProformas: { currency: Currency; count: number; totalMinor: number }[];
@@ -21,7 +20,7 @@ interface Dashboard {
   mailbox: { unread: number };
 }
 
-const APP_NAME: Record<string, string> = { xprism: "XPRISM", amaze: "aMaze", pharmadme: "PharmADME", stat: "Stat 'O' Mate AI", phytonet: "PhytoNet AI", mira: "MIRA" };
+const APP_NAME: Record<string, string> = { xprism: "XPRISM", amaze: "aMaze" };
 const num = (n: number) => new Intl.NumberFormat("en-IN").format(n);
 
 export function DashboardView() {
@@ -82,7 +81,7 @@ export function DashboardView() {
             <Kpi label="Licensed · total" value={num((lic("xprism")?.holders ?? 0) + (lic("amaze")?.holders ?? 0))} sub="Paid and manual licences; free months are counted separately" />
           </div>
 
-          <div className="grid gap-6 xl:grid-cols-2">
+          <div className="grid gap-6">
             <section>
               <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-subtle">Revenue · last 30 days</h2>
               <Table head={["Currency", "Payments", "Gross", "GST", "Refunded", "Net"]} empty={!data.revenueLast30Days.length} minWidth={520}>
@@ -106,19 +105,6 @@ export function DashboardView() {
                   </Link>
                 </Card>
               )}
-            </section>
-            <section>
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-subtle">Pipeline waitlist</h2>
-              <Table head={["Application", "Sign-ups", "Last 30 days", "Not yet notified"]} empty={!data.waitlist.length} minWidth={480}>
-                {data.waitlist.map((w) => (
-                  <tr key={w.appId}>
-                    <td>{APP_NAME[w.appId] ?? w.appId}</td>
-                    <td className="readout">{num(w.total)}</td>
-                    <td className="readout">{num(w.last30Days)}</td>
-                    <td className="readout">{num(w.pendingNotification)}</td>
-                  </tr>
-                ))}
-              </Table>
             </section>
           </div>
           <p className="readout text-xs text-subtle">Generated {new Date(data.generatedAt).toLocaleString("en-IN")}</p>

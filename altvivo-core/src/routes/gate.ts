@@ -65,8 +65,6 @@ export default async function gateRoutes(app: FastifyInstance, d: Deps) {
     const deny = (status: number, error: string, location: string, extra: Record<string, string> = {}) =>
       nav ? reply.redirect(location, 302) : reply.code(status).send({ error, redirect: location, ...extra });
 
-    if (target.status === 'COMING_SOON') return deny(404, 'coming_soon', `${web}/coming-soon?app=${appId}`);
-
     const loginUrl = `${web}/login?redirect=${encodeURIComponent(original)}`;
     const bounceUrl = `${api}/v1/auth/refresh/bounce?next=${encodeURIComponent(original)}`;
     const expired = () => deny(401, 'session_expired', bounceUrl, { refreshUrl: `${api}/v1/auth/refresh` });
@@ -92,7 +90,7 @@ export default async function gateRoutes(app: FastifyInstance, d: Deps) {
     const ent = typeof claims.entitlements?.[appId] === 'object' ? claims.entitlements[appId] : undefined;
     const vip = ent?.source === 'vip' && isEntitled(ent);
     if (target.status === 'MAINTENANCE' && !vip) {
-      return deny(503, 'maintenance', `${web}/coming-soon?app=${appId}&state=maintenance`);
+      return deny(503, 'maintenance', `${web}/maintenance?app=${appId}`);
     }
     if (!isEntitled(ent)) {
       const reason = ent?.active && ent.expires_at !== null && ent.expires_at * 1000 <= Date.now() ? 'subscription_expired' : 'subscription_required';
@@ -123,7 +121,7 @@ export default async function gateRoutes(app: FastifyInstance, d: Deps) {
     if (req.authStale) throw unauthorized('SESSION_STALE', 'Your access changed - refresh the session and retry');
     const claims = req.auth!;
     const ent = claims.entitlements[appId];
-    if (!isEntitled(ent) || target.status === 'COMING_SOON' || (target.status === 'MAINTENANCE' && ent?.source !== 'vip')) {
+    if (!isEntitled(ent) || (target.status === 'MAINTENANCE' && ent?.source !== 'vip')) {
       throw new HttpError(403, 'SUBSCRIPTION_REQUIRED', `An active ${target.name} licence is required`, {
         upgradeUrl: `${d.cfg.webOrigin}/workspace/upgrade?app=${appId}&reason=subscription_required`,
       });

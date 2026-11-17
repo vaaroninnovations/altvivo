@@ -103,7 +103,7 @@ describe('registration, cookies and claims', () => {
     expect(payload.exp! - payload.iat!).toBe(900);
     // Strict paid access: every app is present and inactive until a paid grant exists.
     const none = { active: false, level: 'none', source: null, plan: null, expires_at: null };
-    expect(payload.entitlements).toEqual({ xprism: none, amaze: none, pharmadme: none, stat: none, phytonet: none, mira: none });
+    expect(payload.entitlements).toEqual({ xprism: none, amaze: none });
     expect(ctx.mailer.lastTo('researcher@uni.edu')?.subject).toMatch(/Verify/);
   });
 
@@ -289,7 +289,7 @@ describe('SUPERADMIN spoke switchboard', () => {
     expect(json(await admin.request('GET', '/v1/api/admin/apps')).error.code).toBe('MFA_ENROLLMENT_REQUIRED');
     ({ secret } = await enrolMfa(admin));
     const apps = json(await admin.request('GET', '/v1/api/admin/apps')).apps;
-    expect(apps.map((a: { appId: string }) => a.appId)).toEqual(['xprism', 'amaze', 'pharmadme', 'stat', 'phytonet', 'mira']);
+    expect(apps.map((a: { appId: string }) => a.appId)).toEqual(['xprism', 'amaze']);
   });
 
   it('non-admins are refused', async () => {
@@ -298,44 +298,39 @@ describe('SUPERADMIN spoke switchboard', () => {
     expect((await br.request('GET', '/v1/api/admin/apps')).statusCode).toBe(403);
   });
 
-  it('flips PharmADME to LIVE with an e-signature and busts the registry cache', async () => {
+  it('flips aMaze to BETA with an e-signature and busts the registry cache', async () => {
     await ctx.app.inject({ method: 'GET', url: '/v1/public/apps' }); // warm cache
-    const unsigned = await admin.request('PATCH', '/v1/api/admin/apps/pharmadme', { status: 'LIVE', reason: 'Phase 2 launch', totpCode: '000000' });
+    const unsigned = await admin.request('PATCH', '/v1/api/admin/apps/amaze', { status: 'BETA', reason: 'Beta label test', totpCode: '000000' });
     expect(json(unsigned).error.code).toBe('MFA_CODE_INVALID');
-    const r = await admin.request('PATCH', '/v1/api/admin/apps/pharmadme', { status: 'LIVE', version: '1.0.0', reason: 'Phase 2 launch', totpCode: totpAt(secret, 1) });
+    const r = await admin.request('PATCH', '/v1/api/admin/apps/amaze', { status: 'BETA', reason: 'Beta label test', totpCode: totpAt(secret, 1) });
     expect(r.statusCode).toBe(200);
     const pub = json(await ctx.app.inject({ method: 'GET', url: '/v1/public/apps' })).apps;
-    expect(pub.find((a: { appId: string }) => a.appId === 'pharmadme').status).toBe('LIVE');
-    const ev = await ctx.deps.prisma.auditLog.findFirst({ where: { eventType: 'ADMIN.APP_REGISTRY_CHANGE', resourceId: 'pharmadme' } });
-    expect(ev?.metadata).toMatchObject({ reason: 'Phase 2 launch', signature: { meaning: 'approved', method: 'totp' }, to: { status: 'LIVE' } });
+    expect(pub.find((a: { appId: string }) => a.appId === 'amaze').status).toBe('BETA');
+    const ev = await ctx.deps.prisma.auditLog.findFirst({ where: { eventType: 'ADMIN.APP_REGISTRY_CHANGE', resourceId: 'amaze' } });
+    expect(ev?.metadata).toMatchObject({ reason: 'Beta label test', signature: { meaning: 'approved', method: 'totp' }, to: { status: 'BETA' } });
     expect(ev?.actorId).toBeTruthy();
+    // The retired "coming soon" status can no longer be chosen, through the API or in the database.
+    const soon = await admin.request('PATCH', '/v1/api/admin/apps/amaze', { status: 'COMING_SOON', reason: 'Retired status test', totpCode: '000000' });
+    expect(soon.statusCode).toBe(400);
+    await expect(ctx.deps.prisma.appRegistry.update({ where: { appId: 'amaze' }, data: { status: 'COMING_SOON' } })).rejects.toThrow();
     // Restore for later tests.
-    await admin.request('PATCH', '/v1/api/admin/apps/pharmadme', { status: 'COMING_SOON', reason: 'Test cleanup step', totpCode: totpAt(secret, -1) });
+    await admin.request('PATCH', '/v1/api/admin/apps/amaze', { status: 'LIVE', reason: 'Test cleanup step', totpCode: totpAt(secret, -1) });
+    expect(json(await ctx.app.inject({ method: 'GET', url: '/v1/public/apps' })).apps.find((a: { appId: string }) => a.appId === 'amaze').status).toBe('LIVE');
   });
 });
 
-describe('waitlist', () => {
-  it('anonymous sign-up is idempotent and refuses LIVE apps', async () => {
-    const br = new Browser(ctx.app);
-    await br.csrf();
-    const body = { email: 'early@lab.org', appId: 'mira', turnstileToken: 'ok', source: 'coming-soon' };
-    expect((await br.request('POST', '/v1/public/waitlist', body)).statusCode).toBe(202);
-    expect((await br.request('POST', '/v1/public/waitlist', body)).statusCode).toBe(202);
-    expect(await ctx.deps.prisma.appWaitlist.count({ where: { email: 'early@lab.org' } })).toBe(1);
-    expect(json(await br.request('POST', '/v1/public/waitlist', { ...body, appId: 'xprism' })).error.code).toBe('APP_ALREADY_LIVE');
-  });
-
-  it('workspace toggle joins and leaves; joining never grants access', async () => {
+describe('retired apps and waitlist', () => {
+  it('lists only XPRISM and aMaze and has no waitlist endpoints', async () => {
+    const pub = json(await ctx.app.inject({ method: 'GET', url: '/v1/public/apps' })).apps;
+    expect(pub.map((a: { appId: string }) => a.appId)).toEqual(['xprism', 'amaze']);
     const br = new Browser(ctx.app);
     await register(br, 'toggle@uni.edu');
-    expect((await br.request('POST', '/v1/api/waitlist/stat')).statusCode).toBe(201);
-    await br.request('POST', '/v1/auth/refresh');
+    expect((await br.request('POST', '/v1/public/waitlist', { email: 'early@lab.org', appId: 'xprism', turnstileToken: 'ok' })).statusCode).toBe(404);
+    expect((await br.request('POST', '/v1/api/waitlist/xprism')).statusCode).toBe(404);
     const ws = json(await br.request('GET', '/v1/api/workspace'));
-    expect(ws.apps.find((a: { appId: string }) => a.appId === 'stat')).toMatchObject({ onWaitlist: true, status: 'COMING_SOON', entitlement: { active: false } });
+    expect(ws.apps.map((a: { appId: string }) => a.appId)).toEqual(['xprism', 'amaze']);
+    expect(ws.apps[0]).not.toHaveProperty('onWaitlist');
     expect(ws.apps.find((a: { appId: string }) => a.appId === 'xprism').upgradeUrl).toBe('https://altvivo.bio/workspace/upgrade?app=xprism&reason=subscription_required');
-    expect(ws.user.entitlements.stat.active).toBe(false);
-    await br.request('DELETE', '/v1/api/waitlist/stat');
-    expect(json(await br.request('GET', '/v1/api/workspace')).apps.find((a: { appId: string }) => a.appId === 'stat').onWaitlist).toBe(false);
   });
 });
 
@@ -533,7 +528,7 @@ describe('audit trail integrity after the whole suite', () => {
     await c.end();
     expect(rows[0]).toMatchObject({ ok: true, reason: 'ok' });
     const names = types.map((t) => t.event_type);
-    for (const e of ['AUTH.REGISTER', 'AUTH.LOGIN', 'AUTH.LOGIN_FAILED', 'AUTH.LOGOUT', 'AUTH.MFA_ENABLED', 'SECURITY.ACCOUNT_LOCKED', 'SECURITY.REFRESH_TOKEN_REUSE', 'ADMIN.APP_REGISTRY_CHANGE', 'DB.APP_ENTITLEMENTS.INSERT', 'VAULT.UPLOAD_REJECTED', 'ORG.AUTO_JOIN', 'WAITLIST.JOIN', 'AUTH.OAUTH_LINKED']) {
+    for (const e of ['AUTH.REGISTER', 'AUTH.LOGIN', 'AUTH.LOGIN_FAILED', 'AUTH.LOGOUT', 'AUTH.MFA_ENABLED', 'SECURITY.ACCOUNT_LOCKED', 'SECURITY.REFRESH_TOKEN_REUSE', 'ADMIN.APP_REGISTRY_CHANGE', 'DB.APP_ENTITLEMENTS.INSERT', 'VAULT.UPLOAD_REJECTED', 'ORG.AUTO_JOIN', 'AUTH.OAUTH_LINKED']) {
       expect(names).toContain(e);
     }
   });

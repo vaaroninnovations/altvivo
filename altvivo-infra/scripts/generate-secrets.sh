@@ -4,7 +4,7 @@
 #
 #   sudo ./scripts/generate-secrets.sh                 # first-time: .env, JWT keys, Redis ACL
 #   sudo ./scripts/generate-secrets.sh --acl           # rebuild secrets/redis/users.acl from .env
-#   sudo ./scripts/generate-secrets.sh --spoke <app>   # add secrets for a Phase-2 spoke
+#   sudo ./scripts/generate-secrets.sh --spoke <app>   # add secrets for a new spoke
 #   sudo ./scripts/generate-secrets.sh --rotate-jwt    # new RS256 key, keep old one for verification
 #
 # Never overwrites an existing .env or key pair.

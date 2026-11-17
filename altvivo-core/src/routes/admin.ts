@@ -21,7 +21,7 @@ export const signature = (claims: { sub: string; name: string }) => ({ signer_id
 
 const AppPatchBody = z
   .object({
-    status: z.enum(['LIVE', 'BETA', 'COMING_SOON', 'MAINTENANCE']).optional(),
+    status: z.enum(['LIVE', 'BETA', 'MAINTENANCE']).optional(),
     version: z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$/).optional(),
     requiresCredits: z.boolean().optional(),
     reason,
@@ -89,7 +89,7 @@ export default async function adminRoutes(app: FastifyInstance, d: Deps) {
   // =========================================================== dashboard ===
   app.get('/v1/api/admin/dashboard', opts, async () => {
     const q = d.prisma.$queryRaw.bind(d.prisma);
-    const [mrr, byApp, kinds, sessions, waitlist, revenue, users, proformas, trials, unreadMail] = await Promise.all([
+    const [mrr, byApp, kinds, sessions, revenue, users, proformas, trials, unreadMail] = await Promise.all([
       q<{ currency: string; mrr: bigint; subs: number }[]>`
         SELECT currency, coalesce(sum(mrr_minor), 0)::bigint AS mrr, count(*)::int AS subs FROM revenue_active_subscriptions GROUP BY currency`,
       q<{ app_id: string; holders: number; seats: number }[]>`
@@ -113,10 +113,6 @@ export default async function adminRoutes(app: FastifyInstance, d: Deps) {
       q<{ active: number; users24h: number }[]>`
         SELECT count(*)::int AS active, count(DISTINCT user_id) FILTER (WHERE last_used_at > now() - interval '24 hours')::int AS users24h
           FROM auth_sessions WHERE revoked_at IS NULL AND expires_at > now()`,
-      q<{ app_id: string; total: number; last30: number; pending: number }[]>`
-        SELECT app_id, count(*)::int AS total, count(*) FILTER (WHERE created_at > now() - interval '30 days')::int AS last30,
-               count(*) FILTER (WHERE NOT notified)::int AS pending
-          FROM app_waitlist GROUP BY app_id`,
       q<{ currency: string; gross: bigint; tax: bigint; refunded: bigint; payments: number }[]>`
         SELECT currency, coalesce(sum(amount_minor), 0)::bigint AS gross, coalesce(sum(tax_minor), 0)::bigint AS tax,
                coalesce(sum(refunded_minor), 0)::bigint AS refunded, count(*)::int AS payments
@@ -146,7 +142,6 @@ export default async function adminRoutes(app: FastifyInstance, d: Deps) {
       activeLicencesByApp: byApp.map((r) => ({ appId: r.app_id, holders: r.holders, seats: r.seats })),
       activeSubscriptionsByKind: kinds,
       sessions: sessions[0] ?? { active: 0, users24h: 0 },
-      waitlist: waitlist.map((w) => ({ appId: w.app_id, total: w.total, last30Days: w.last30, pendingNotification: w.pending })),
       revenueLast30Days: revenue.map((r) => ({ currency: r.currency, grossMinor: n(r.gross), taxMinor: n(r.tax), refundedMinor: n(r.refunded), netMinor: n(r.gross - r.tax - r.refunded), payments: r.payments })),
       users: users[0],
       openProformas: proformas.map((p) => ({ currency: p.currency, count: p.open, totalMinor: n(p.total) })),
@@ -158,19 +153,12 @@ export default async function adminRoutes(app: FastifyInstance, d: Deps) {
 
   // ================================================== spoke switchboard ====
   app.get('/v1/api/admin/apps', opts, async () => {
-    const [apps, waitlist, pending] = await Promise.all([
-      d.prisma.appRegistry.findMany({ orderBy: [{ sortOrder: 'asc' }] }),
-      d.prisma.appWaitlist.groupBy({ by: ['appId'], _count: { _all: true } }),
-      d.prisma.appWaitlist.groupBy({ by: ['appId'], where: { notified: false }, _count: { _all: true } }),
-    ]);
-    const count = (rows: { appId: string; _count: { _all: number } }[], id: string) => rows.find((r) => r.appId === id)?._count._all ?? 0;
+    const apps = await d.prisma.appRegistry.findMany({ orderBy: [{ sortOrder: 'asc' }] });
     return {
       apps: apps.map((a) => ({
         ...toPublicApp(a),
         statusChangedAt: a.statusChangedAt,
         statusChangedBy: a.statusChangedBy,
-        waitlistTotal: count(waitlist, a.appId),
-        waitlistPendingNotification: count(pending, a.appId),
       })),
     };
   });
@@ -206,49 +194,6 @@ export default async function adminRoutes(app: FastifyInstance, d: Deps) {
       await d.revocations.markClaimsStale(ids.map((s) => s.userId));
     }
     return { app: toPublicApp(updated) };
-  });
-
-  /** Emails everyone waiting for an app once it is BETA/LIVE. Idempotent per address. */
-  app.post('/v1/api/admin/apps/:appId/notify-waitlist', opts, async (req) => {
-    const { appId } = parse(AppIdParam, req.params);
-    const body = parse(SignedBody, req.body);
-    await assertTotp(d, req.auth!.sub, body.totpCode);
-    const appRow = await d.prisma.appRegistry.findUnique({ where: { appId } });
-    if (!appRow) throw notFound('UNKNOWN_APP', 'Unknown application');
-    if (appRow.status !== 'LIVE' && appRow.status !== 'BETA') throw conflict('APP_NOT_LAUNCHED', 'Launch the app (BETA or LIVE) before notifying');
-    let sent = 0;
-    let failed = 0;
-    for (;;) {
-      const batch = await d.prisma.appWaitlist.findMany({ where: { appId, notified: false }, take: 200, orderBy: { createdAt: 'asc' } });
-      if (!batch.length) break;
-      for (const entry of batch) {
-        try {
-          await d.mailer.send({ to: entry.email, ...templates.appLaunched(appRow.name, `${d.cfg.webOrigin}/pricing?app=${appId}`) });
-          await d.prisma.appWaitlist.update({ where: { id: entry.id }, data: { notified: true, notifiedAt: new Date() } });
-          sent += 1;
-        } catch (err) {
-          failed += 1;
-          req.log.warn({ err, appId }, 'waitlist notification failed');
-          if (failed > 50) break;
-        }
-      }
-      if (failed > 50) break;
-    }
-    await withAudit(d.prisma, actorOf(req), (tx) => audit(tx, 'ADMIN.WAITLIST_NOTIFIED', appId, { sent, failed, reason: body.reason }));
-    return { sent, failed };
-  });
-
-  app.get<{ Querystring: { appId?: string; cursor?: string; limit?: string } }>('/v1/api/admin/waitlist', opts, async (req) => {
-    const limit = Math.min(1000, Math.max(1, Number(req.query.limit ?? 200) || 200));
-    const rows = await d.prisma.appWaitlist.findMany({
-      where: req.query.appId ? { appId: req.query.appId } : {},
-      orderBy: { id: 'asc' },
-      take: limit + 1,
-      ...(req.query.cursor && z.string().uuid().safeParse(req.query.cursor).success ? { cursor: { id: req.query.cursor }, skip: 1 } : {}),
-      select: { id: true, email: true, appId: true, source: true, notified: true, createdAt: true, userId: true },
-    });
-    const more = rows.length > limit;
-    return { entries: rows.slice(0, limit), nextCursor: more ? rows[limit - 1]!.id : null };
   });
 
   // ============================================================== pricing ===

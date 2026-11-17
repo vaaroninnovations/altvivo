@@ -8,7 +8,6 @@
 #       api.altvivo.bio        -> altvivo-core:4000  (IdP / SSO / billing)
 #       embed.altvivo.bio      -> /srv/embed         (bar.js web component)
 #       <live spoke>.altvivo.bio -> spokes-enabled/*.caddy
-#       <phase-2>.altvivo.bio  -> altvivo-web /coming-soon (coming-soon.caddy)
 #       anything else          -> 302 to apex
 #   * Upstream 502/503/504 on any spoke -> altvivo-web maintenance page
 # Reload without downtime:
@@ -250,12 +249,7 @@ altvivo.bio, *.altvivo.bio {
 	}
 
 	# --- LIVE spokes (one file per spoke, e.g. xprism.caddy, amaze.caddy) ----
-	# Imported BEFORE the coming-soon holding route, so an enabled spoke always
-	# wins even if its host is still listed in coming-soon.caddy.
 	import /etc/caddy/spokes-enabled/*.caddy
-
-	# --- Phase-2 holding route -----------------------------------------------
-	import /etc/caddy/coming-soon.caddy
 
 	# --- Unknown subdomain ---------------------------------------------------
 	handle {
@@ -280,7 +274,7 @@ altvivo.bio, *.altvivo.bio {
 				reverse_proxy altvivo-web:3000
 			}
 			handle {
-				rewrite * /coming-soon?app={labels.2}&state=maintenance
+				rewrite * /maintenance?app={labels.2}
 				reverse_proxy altvivo-web:3000
 			}
 		}

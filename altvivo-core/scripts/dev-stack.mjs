@@ -195,8 +195,6 @@ This text shows how a biography with several paragraphs appears in the advisory-
   for (const [app, ev, res] of [["amaze", "AMAZE.TRIAL_RECORDED", "trial-17"], ["xprism", "XPRISM.EXPERIMENT_SUBMITTED", "organ-bath-07"], ["amaze", "AMAZE.TRIAL_RECORDED", "trial-18"]]) {
     await db.query(`INSERT INTO audit_logs (actor_type, actor_id, app_id, event_type, resource_id) VALUES ('SERVICE', $1, $2, $3, $4)`, [pi.id, app, ev, res]);
   }
-  await db.query(`INSERT INTO app_waitlist (user_id, email, app_id, source) VALUES ($1, 'researcher@altvivo.test', 'stat', 'workspace')`, [pi.id]);
-  await db.query(`INSERT INTO app_waitlist (email, app_id, source) VALUES ('early1@lab.test','pharmadme','web'), ('early2@lab.test','pharmadme','coming-soon')`);
   // ---- one month free: a running free month, two requests waiting, one declined
   const { rows: [student] } = await db.query(`SELECT id FROM users WHERE email = 'student@altvivo.test'`);
   const { rows: [running] } = await db.query(

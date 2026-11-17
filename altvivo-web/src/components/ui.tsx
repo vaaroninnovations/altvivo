@@ -98,8 +98,7 @@ export function StatusBadge({ status }: { status: AppStatus }) {
       </Pill>
     );
   if (status === "BETA") return <Pill tone="accent">Beta</Pill>;
-  if (status === "MAINTENANCE") return <Pill tone="muted">Maintenance</Pill>;
-  return <Pill tone="soon">Coming soon</Pill>;
+  return <Pill tone="muted">Maintenance</Pill>;
 }
 
 const SOURCE_LABEL: Record<NonNullable<ApiEntitlement["source"]>, string> = {

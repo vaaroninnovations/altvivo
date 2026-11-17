@@ -20,7 +20,7 @@ export async function loadAccess(db: Db, userId: string): Promise<AccessRow[]> {
       FROM user_access_claims(${userId}::uuid)`;
 }
 
-/** Apps a VIP may open without a grant. COMING_SOON stays closed for everyone. */
+/** Apps a VIP may open without a grant. */
 const VIP_OPEN: ReadonlySet<AppStatus> = new Set(['LIVE', 'BETA', 'MAINTENANCE']);
 
 const NONE: EntitlementClaim = { active: false, level: 'none', source: null, plan: null, expires_at: null };

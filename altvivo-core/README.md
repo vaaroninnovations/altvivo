@@ -41,17 +41,17 @@ On their next request the gate makes the browser refresh, so new access applies 
 | OAuth | `GET /v1/auth/oauth/{google,orcid}/start?next=` → `/callback` · `GET /v1/auth/oauth/pending/:id` | PKCE (Google), nonce, browser-bound state |
 | MFA | `POST /v1/api/mfa/enroll` · `activate` · `recovery-codes` · `disable` | TOTP, replay-protected, 10 recovery codes |
 | Public | `GET /v1/public/apps` · `plans?currency=` · `advisory-board[?featured=1]` | prices exclude GST; currency from `CF-IPCountry` |
-| | `POST /v1/public/waitlist` · `contact` · `consent` | contact: CSRF + Origin, 5/min/IP and 5/day/address, honeypot; consent: append-only evidence |
+| | `POST /v1/public/contact` · `consent` | contact: CSRF + Origin, 5/min/IP and 5/day/address, honeypot; consent: append-only evidence |
 | User | `GET/PATCH /v1/api/me` · `POST /v1/api/me/password` · `GET /v1/api/workspace` · `GET/DELETE /v1/api/sessions[/:id]` | workspace shows live entitlements and upgrade links |
-| | `POST/DELETE /v1/api/waitlist/:appId` · `GET /v1/api/credits/ledger` · `GET /v1/api/vault/files[/:id/download]` · `DELETE /v1/api/vault/files/:id` | |
+| | `GET /v1/api/credits/ledger` · `GET /v1/api/vault/files[/:id/download]` · `DELETE /v1/api/vault/files/:id` | |
 | Billing | `GET/PUT /v1/api/billing/profile?scope=personal\|organization` | GST bill-to details (GSTIN checksum, state, PIN) |
 | | `POST /v1/api/billing/checkout {planCode, seats?}` | draft GST invoice → Razorpay order (INR) or Stripe Checkout (USD) |
 | | `POST /v1/api/billing/razorpay/confirm` | verifies the Checkout signature, captures, activates, returns fresh claims |
 | | `GET /v1/api/billing/subscriptions` · `POST …/:id/cancel` · `GET /v1/api/billing/invoices` · `…/:id/pdf` · `GET /v1/api/billing/payments` | personal, plus the institution's for its administrators |
 | | `POST /v1/api/billing/quotes {planCode, seats, poNumber?}` | institution admins: self-service proforma (PDF) |
 | Webhooks | `POST /v1/billing/webhooks/stripe` · `POST /v1/billing/webhooks/razorpay` | HMAC over raw bytes, stored once, retried on failure |
-| Admin | `GET /v1/api/admin/dashboard` | MRR/ARR per currency, licences per app, sessions, waitlist, 30-day revenue, open proformas |
-| | `GET/PATCH /v1/api/admin/apps[/:appId]` · `POST …/:appId/notify-waitlist` · `GET /v1/api/admin/waitlist` · `GET/PATCH /v1/api/admin/plans[/:code]` | switchboard and pricing |
+| Admin | `GET /v1/api/admin/dashboard` | MRR/ARR per currency, licences per app, sessions, 30-day revenue, open proformas |
+| | `GET/PATCH /v1/api/admin/apps[/:appId]` (LIVE / BETA / MAINTENANCE) · `GET/PATCH /v1/api/admin/plans[/:code]` | switchboard and pricing |
 | | `GET /v1/api/admin/users[?q=]` · `GET/PATCH …/:id` · `POST …/:id/mfa-reset` · `POST …/:id/logout-all` | |
 | | `GET/POST /v1/api/admin/licences` · `PATCH …/:id` · `POST …/:id/revoke` | manual licences with custom expiry (offline NEFT / RTGS / PO) |
 | | `GET/POST /v1/api/admin/organizations` · `GET/PATCH …/:id` · `PUT …/:id/billing-profile` · `POST/DELETE …/:id/members[/:userId]` · `POST …/:id/proformas` | institutional tenants, seats, domains |

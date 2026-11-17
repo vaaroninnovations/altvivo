@@ -3,7 +3,7 @@
 # Create the Postgres role + database for a spoke that is being launched after
 # first boot (initdb only runs once).
 #
-#   ./scripts/provision-spoke-db.sh pharmadme
+#   ./scripts/provision-spoke-db.sh <app_id>
 #
 # Reads <APP>_DB_PASSWORD from .env (add it with
 # `sudo ./scripts/generate-secrets.sh --spoke <app>`). Idempotent.
