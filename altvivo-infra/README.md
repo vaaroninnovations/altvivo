@@ -219,7 +219,7 @@ See [`CONTRACTS.md`](CONTRACTS.md): access-token claims with paid entitlements, 
 | Container uid/gid | `10001:10001` (core, web, XPRISM), `101:101` (aMaze nginx) |
 | Core listen / health | `:4000`, `GET /healthz`; migrations `node db/scripts/deploy.mjs` |
 | Web listen / health | `:3000`, `GET /api/health` |
-| XPRISM | `:8000`, `GET /healthz`; migrations + `createcachetable` in `xprism-migrate` |
+| XPRISM | `:8000`, `GET /healthz`; migrations + `createcachetable` + `bootstrap_lab` (experiment catalogue) in `xprism-migrate` |
 | aMaze | `:8080`, `GET /healthz` (nginx) |
 | JWT keys | `/run/secrets/jwt_private_key`, `jwt_public_key`, `jwt_previous_public_key`; `JWT_KID` |
 | Redis key prefixes | `core:*`, `xprism:*`; revocations at `core:revoked:*` |

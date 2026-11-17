@@ -457,7 +457,9 @@ services:
     security_opt: [no-new-privileges:true]
     user: "10001:10001"
     logging: *default-logging
-    command: ["sh", "-c", "python manage.py migrate --noinput && python manage.py createcachetable"]
+    # bootstrap_lab (no flags) loads or refreshes the experiment catalogue from
+    # lab/modules.json; without it XPRISM lists no experiments. Safe to re-run.
+    command: ["sh", "-c", "python manage.py migrate --noinput && python manage.py createcachetable && python manage.py bootstrap_lab"]
     env_file:
       - path: ./env/xprism.env    # XPRISM's own settings (email, legal, SEO, mailbox); optional
         required: false
