@@ -2,14 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, BellRing, CalendarClock, FileText, Gift, History, Lock, Rocket, ShieldCheck, Wrench } from "lucide-react";
+import { ArrowUpRight, CalendarClock, FileText, Gift, History, Lock, Rocket, ShieldCheck, Wrench } from "lucide-react";
 import { AppIcon, AppLogo, hasAppLogo } from "@/components/brand";
 import type { Viewer } from "@/components/checkout";
 import { Alert, Button, ButtonLink, Card, LicenceBadge, Pill, StatusBadge, entitled, formatBytes, formatDate } from "@/components/ui";
 import { TrialStatus } from "@/components/trial";
 import { UnlockDialog } from "@/components/unlock";
 import { BuyAnalysesDialog } from "@/components/usage";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { isAvailable } from "@/lib/catalog";
 import { trialLength, trialState } from "@/lib/trial";
 import type { CatalogResponse, WorkspaceApp, WorkspaceData } from "@/lib/types";
@@ -183,40 +183,6 @@ function LiveAppCard({
   );
 }
 
-function PipelineCard({ app }: { app: WorkspaceApp }) {
-  const [listed, setListed] = useState(app.onWaitlist);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  async function toggle() {
-    setBusy(true);
-    setError(null);
-    try {
-      await api(`/v1/api/waitlist/${app.appId}`, { method: listed ? "DELETE" : "POST" });
-      setListed(!listed);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not update the waitlist.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Card className="flex flex-col p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="grid size-10 place-items-center rounded-xl border border-line bg-surface-2 text-muted">
-          <AppIcon iconKey={app.iconKey} className="size-5" />
-        </div>
-        <StatusBadge status={app.status} />
-      </div>
-      <h3 className="mt-4 font-semibold">{app.name}</h3>
-      <p className="mt-1 flex-1 text-sm text-muted">{app.tagline}</p>
-      {error && <p className="mt-2 text-xs text-danger">{error}</p>}
-      <Button size="sm" variant={listed ? "ghost" : "outline"} className="mt-4" onClick={toggle} loading={busy}>
-        <BellRing className="size-4" aria-hidden /> {listed ? "On the launch list · leave" : "Notify me at launch"}
-      </Button>
-    </Card>
-  );
-}
-
 export function LauncherView({
   data,
   catalog,
@@ -239,7 +205,6 @@ export function LauncherView({
   const [activated, setActivated] = useState(false);
   const [resent, setResent] = useState<"idle" | "busy" | "sent">("idle");
   const live = data.apps.filter(isAvailable);
-  const pipeline = data.apps.filter((a) => a.status === "COMING_SOON");
   const licensed = live.filter((a) => entitled(a.entitlement)).length;
   const firstName = user.name.replace(/^(Dr|Prof)\.?\s+/i, "").split(/\s+/)[0];
   const n = notice ? NOTICES[notice] : undefined;
@@ -354,22 +319,6 @@ export function LauncherView({
           ))}
         </div>
       </section>
-
-      {pipeline.length > 0 && (
-        <section aria-labelledby="pipeline-h">
-          <div className="mb-4 flex items-baseline justify-between gap-4">
-            <h2 id="pipeline-h" className="text-sm font-semibold uppercase tracking-wider text-subtle">
-              Coming to AltVivo
-            </h2>
-            <p className="text-xs text-subtle">We email you once, at launch.</p>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {pipeline.map((a) => (
-              <PipelineCard key={a.appId} app={a} />
-            ))}
-          </div>
-        </section>
-      )}
 
       <section aria-labelledby="vault-h">
         <h2 id="vault-h" className="mb-4 text-sm font-semibold uppercase tracking-wider text-subtle">
