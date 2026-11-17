@@ -1,4 +1,4 @@
-From dfb13cac648073dabe347989deea3148f558328e Mon Sep 17 00:00:00 2001
+From be83325dbc97653f52e29bf8f241f1a99851d34f Mon Sep 17 00:00:00 2001
 From: AltVivo-Integration <integration@altvivo.invalid>
 Date: Sun, 15 Nov 2026 06:58:27 +0530
 Subject: [PATCH] AltVivo SSO with paid-entitlement gate; container image;
@@ -16,13 +16,17 @@ Subject: [PATCH] AltVivo SSO with paid-entitlement gate; container image;
  .dockerignore                           |  13 +
  Dockerfile                              |  39 ++
  config/settings.py                      |  15 +
- lab/altvivo_sso_middleware.py           | 496 ++++++++++++++++++++++++
+ lab/altvivo_sso_middleware.py           | 498 ++++++++++++++++++++++++
+ lab/context.py                          |   2 +-
+ lab/forms.py                            |  15 +
  lab/migrations/0013_user_altvivo_sub.py |  16 +
  lab/models.py                           |   2 +
- lab/tests_altvivo.py                    | 239 ++++++++++++
- lab/views_staff.py                      |   2 +-
+ lab/tests_altvivo.py                    | 282 ++++++++++++++
+ lab/urls.py                             |   1 +
+ lab/views_staff.py                      |  39 +-
+ lab/views_student.py                    |  27 +-
  requirements.txt                        |   5 +-
- 9 files changed, 825 insertions(+), 2 deletions(-)
+ 13 files changed, 947 insertions(+), 7 deletions(-)
  create mode 100644 .dockerignore
  create mode 100644 Dockerfile
  create mode 100644 lab/altvivo_sso_middleware.py
@@ -118,10 +122,10 @@ index 211f4b6..becf2dd 100644
 +    SITE_URL = env('ALTVIVO_PUBLIC_ORIGIN', SITE_URL)
 diff --git a/lab/altvivo_sso_middleware.py b/lab/altvivo_sso_middleware.py
 new file mode 100644
-index 0000000..d9824d7
+index 0000000..8963db6
 --- /dev/null
 +++ b/lab/altvivo_sso_middleware.py
-@@ -0,0 +1,496 @@
+@@ -0,0 +1,498 @@
 +"""AltVivo single sign-on and paid-entitlement gate for XPRISM.
 +
 +Active when ALTVIVO_JWKS_URL is set (config/settings.py). Layer 2 of the
@@ -434,7 +438,9 @@ index 0000000..d9824d7
 +    # Accounts XPRISM itself manages (own password, or placed in a college by
 +    # its admins) keep the role XPRISM gave them. Accounts that exist only
 +    # through AltVivo follow the role chosen at altvivo.bio.
-+    sso_only = not user.has_usable_password() and not user.is_superuser and user.college_id is None
++    # (A personal "college" made for an independent faculty member's batches still counts as none.)
++    sso_only = (not user.has_usable_password() and not user.is_superuser
++                and (user.college_id is None or user.college.code.startswith('av-')))
 +    if role == 'SUPERADMIN' and claims.get('mfa') is True and user.role != Role.SUPERADMIN:
 +        user.role = Role.SUPERADMIN
 +        changed.append('role')
@@ -618,6 +624,45 @@ index 0000000..d9824d7
 +        if response.has_header('Content-Length'):
 +            response['Content-Length'] = str(len(response.content))
 +        return response
+diff --git a/lab/context.py b/lab/context.py
+index f4e7e52..ed24474 100644
+--- a/lab/context.py
++++ b/lab/context.py
+@@ -34,7 +34,7 @@ def site(request):
+     if u.is_authenticated:
+         r = u.role
+         if r == Role.STUDENT:
+-            nav = [('My assignments', '/student/'), ('Practice lab', '/modules/')] if (u.has_full_access or not u.is_trial_account) else [('Lab (free trial)', '/modules/'), ('Subscribe', '/subscribe/')]
++            nav = [('My assignments', '/student/'), ('Practice lab', '/modules/'), ('Join a class', '/join/')] if (u.has_full_access or not u.is_trial_account) else [('Lab (free trial)', '/modules/'), ('Subscribe', '/subscribe/')]
+         if r in (Role.FACULTY, Role.LAB_ASSISTANT):
+             nav = [('Dashboard', '/faculty/'), ('Batches', '/faculty/batches/'), ('Experiments', '/modules/'), ('Feedback', '/feedback/')]
+         if r == Role.COLLEGE_ADMIN:
+diff --git a/lab/forms.py b/lab/forms.py
+index 5caaee2..fc62591 100644
+--- a/lab/forms.py
++++ b/lab/forms.py
+@@ -93,6 +93,21 @@ class BatchForm(StyledMixin, forms.ModelForm):
+         self._style()
+ 
+ 
++class JoinClassForm(StyledMixin, forms.Form):
++    code = forms.CharField(label='Class code', max_length=12, help_text='The code your faculty shared with the class.')
++
++    def __init__(self, *a, **kw):
++        super().__init__(*a, **kw)
++        self._style()
++
++    def clean_code(self):
++        code = self.cleaned_data['code'].strip().upper()
++        self.batch = Batch.objects.select_related('college').filter(class_code=code, join_enabled=True, archived=False, college__is_active=True).first()
++        if self.batch is None:
++            raise forms.ValidationError('No open class has that code. Check it with your faculty.')
++        return code
++
++
+ class DTInput(forms.DateTimeInput):
+     input_type = 'datetime-local'
+ 
 diff --git a/lab/migrations/0013_user_altvivo_sub.py b/lab/migrations/0013_user_altvivo_sub.py
 new file mode 100644
 index 0000000..c9ab956
@@ -655,10 +700,10 @@ index 2cf1fc7..f2b2669 100644
      def display_name(self):
 diff --git a/lab/tests_altvivo.py b/lab/tests_altvivo.py
 new file mode 100644
-index 0000000..e6de9c9
+index 0000000..05cf5e8
 --- /dev/null
 +++ b/lab/tests_altvivo.py
-@@ -0,0 +1,239 @@
+@@ -0,0 +1,282 @@
 +"""Tests for lab/altvivo_sso_middleware.py (AltVivo SSO + paid gate).
 +
 +Run with SSO switched on; the tests write their own JWKS to that path:
@@ -816,6 +861,49 @@ index 0000000..e6de9c9
 +        u.refresh_from_db()
 +        self.assertEqual((u.role, u.occupation), (Role.FACULTY, 'researcher'))
 +
++    def _signed_in(self, **claims):
++        """A fresh browser signed in through SSO, past XPRISM's consent and ethics steps."""
++        self.c = Client(HTTP_HOST=HOST)
++        tok, c = token(**claims)
++        self.get('/modules/', tok)
++        u = User.objects.get(pk=self.uid())
++        u.consent_version, u.ethics_version = settings.POLICY_VERSION, settings.ETHICS_VERSION
++        u.save(update_fields=['consent_version', 'ethics_version'])
++        return u
++
++    def test_independent_faculty_creates_a_batch_and_a_student_joins_it(self):
++        from .models import Batch, Enrollment
++        fac = self._signed_in(role='RESEARCHER', email='fac@uni.edu.in')
++        self.assertIsNone(fac.college_id)
++        page = self.c.get('/faculty/batches/new/', secure=True)
++        self.assertEqual(page.status_code, 200)
++        r = self.c.post('/faculty/batches/new/', {'name': 'B.Pharm Section A', 'academic_year': '2026-27', 'join_enabled': 'on'}, secure=True)
++        self.assertEqual(r.status_code, 302, r.content[:300])
++        fac.refresh_from_db()
++        self.assertTrue(fac.college.code.startswith('av-'))
++        self.assertFalse(fac.college.is_subscribed)
++        batch = Batch.objects.get(name='B.Pharm Section A')
++        self.assertEqual(batch.college_id, fac.college_id)
++        self.assertTrue(batch.faculty.filter(pk=fac.pk).exists())
++        detail = self.c.get(f'/faculty/batches/{batch.pk}/', secure=True)
++        self.assertContains(detail, f'/join/?code={batch.class_code}')
++        # Still follows the AltVivo role although it now owns a personal college.
++        self.assertEqual(fac.role, Role.FACULTY)
++
++        stu = self._signed_in(role='STUDENT', email='stu@uni.edu.in')
++        bad = self.c.post('/join/', {'code': 'NOPE2345'}, secure=True)
++        self.assertEqual(bad.status_code, 200)
++        self.assertContains(bad, 'No open class has that code')
++        ok = self.c.post('/join/', {'code': batch.class_code.lower()}, secure=True)
++        self.assertEqual(ok.status_code, 302)
++        self.assertTrue(Enrollment.objects.filter(batch=batch, student=stu, via='class_code').exists())
++        self.assertEqual(self.c.post('/join/', {'code': batch.class_code}, secure=True).status_code, 302)  # joining twice is harmless
++        self.assertEqual(Enrollment.objects.filter(batch=batch, student=stu).count(), 1)
++
++    def test_faculty_cannot_use_the_join_page(self):
++        self._signed_in(role='PI', email='pi@uni.edu.in')
++        self.assertEqual(self.c.get('/join/', secure=True).status_code, 403)
++
 +    def test_college_managed_role_is_left_alone(self):
 +        college = College.objects.create(name='Dev College', code='dev')
 +        mine = User.objects.create_user('stu1', email='priya@uni.edu.in', password='Pw-123456789', role=Role.STUDENT, college=college, email_verified=True)
@@ -898,19 +986,150 @@ index 0000000..e6de9c9
 +        self.assertEqual(page.content.count(b'<altvivo-topbar'), 1)
 +        r = self.c.post('/accounts/logout/', secure=True)
 +        self.assertEqual(r['Location'], 'https://altvivo.bio/logout?next=https%3A%2F%2Fxprism.altvivo.bio%2F')
+diff --git a/lab/urls.py b/lab/urls.py
+index e139187..6f4ad49 100644
+--- a/lab/urls.py
++++ b/lab/urls.py
+@@ -48,6 +48,7 @@ urlpatterns = [
+ 
+     # student
+     path('student/', stu.dashboard, name='student_dashboard'),
++    path('join/', stu.join_class, name='join_class'),
+     path('student/assignments/<int:pk>/', stu.assignment, name='student_assignment'),
+     path('api/attempts/<int:pk>/submit', stu.api_submit, name='api_submit'),
+     path('api/experiments/<slug:slug>/feedback', stu.api_feedback, name='api_feedback'),
 diff --git a/lab/views_staff.py b/lab/views_staff.py
-index 07936b1..28553a4 100644
+index 07936b1..7c77557 100644
 --- a/lab/views_staff.py
 +++ b/lab/views_staff.py
-@@ -38,7 +38,7 @@ def batch_list(request):
+@@ -1,5 +1,6 @@
+ import csv
+ import io
++import secrets
+ from collections import defaultdict
+ 
+ from django.contrib import messages
+@@ -12,19 +13,51 @@ from django.utils import timezone
+ from django.views.decorators.http import require_POST
+ 
+ from .forms import AssignmentForm, BatchForm, GradeForm, StudentAddForm, UploadForm, make_username, temp_password
+-from .models import Assignment, Attempt, Batch, Enrollment, ExperimentFeedback, Role, User, new_class_code
++from django.conf import settings
++from django.urls import reverse
++
++from .models import Assignment, Attempt, Batch, College, Enrollment, ExperimentFeedback, Role, User, new_class_code
+ from .permissions import (audit, batches_for, can_enrol, can_grade, can_manage_batch, get_assignment_or_403,
+                           get_attempt_or_403, get_batch_or_403, role_required)
+ 
+ STAFF = (Role.FACULTY, Role.LAB_ASSISTANT, Role.COLLEGE_ADMIN)
+ 
+ 
++PERSONAL_COLLEGE_PREFIX = 'av-'
++
++
++def _independent_faculty(user):
++    """Faculty who came through AltVivo SSO without a college (no XPRISM password)."""
++    return user.role == Role.FACULTY and user.college_id is None and not user.has_usable_password()
++
++
++def personal_college(user):
++    """The private 'college' that holds an independent faculty member's batches. Unsubscribed: access still comes from AltVivo."""
++    with transaction.atomic():
++        u = User.objects.select_for_update().get(pk=user.pk)
++        if u.college_id is None:
++            u.college = College.objects.create(
++                name=f'{u.display_name} (independent)'[:200], code=f'{PERSONAL_COLLEGE_PREFIX}{secrets.token_hex(6)}',
++                contact_email=u.email or '', subscription_active=False)
++            u.save(update_fields=['college'])
++    user.college = u.college
++    return u.college
++
++
+ def _college_for_new_batch(request):
+     if request.user.college:
+         return request.user.college
++    if _independent_faculty(request.user):
++        return personal_college(request.user)
+     raise PermissionDenied('Platform admins create batches from inside a college (use Django admin).')
+ 
+ 
++def _join_url(request, batch):
++    if getattr(settings, 'ALTVIVO_SSO_ENABLED', False):
++        return request.build_absolute_uri(reverse('join_class') + f'?code={batch.class_code}')
++    return request.build_absolute_uri(f'/accounts/signup/?code={batch.class_code}')
++
++
+ @role_required(*STAFF)
+ def dashboard(request):
+     bs = batches_for(request.user).filter(archived=False).annotate(n_students=Count('enrollments', distinct=True))
+@@ -38,7 +71,7 @@ def batch_list(request):
      show_archived = request.GET.get('archived') == '1'
      bs = batches_for(request.user).filter(archived=show_archived).annotate(n_students=Count('enrollments', distinct=True), n_assign=Count('assignments', distinct=True)).prefetch_related('faculty')
      return render(request, 'lab/batch_list.html', {'batches': bs, 'show_archived': show_archived,
 -                                                   'can_create': request.user.role in (Role.FACULTY, Role.COLLEGE_ADMIN)})
-+                                                   'can_create': request.user.role in (Role.FACULTY, Role.COLLEGE_ADMIN) and request.user.college_id is not None})
++                                                   'can_create': request.user.role in (Role.FACULTY, Role.COLLEGE_ADMIN) and (request.user.college_id is not None or _independent_faculty(request.user))})
  
  
  @role_required(Role.FACULTY, Role.COLLEGE_ADMIN)
+@@ -71,7 +104,7 @@ def batch_detail(request, pk):
+         n_grade=Count('attempts', filter=Q(attempts__status=Attempt.SUBMITTED), distinct=True))
+     return render(request, 'lab/batch_detail.html', {
+         'b': b, 'enrolls': enrolls, 'assigns': assigns, 'manage': can_manage_batch(request.user, b), 'enrol': can_enrol(request.user, b),
+-        'add_form': StudentAddForm(), 'upload_form': UploadForm(), 'join_url': request.build_absolute_uri(f'/accounts/signup/?code={b.class_code}')})
++        'add_form': StudentAddForm(), 'upload_form': UploadForm(), 'join_url': _join_url(request, b)})
+ 
+ 
+ @require_POST
+diff --git a/lab/views_student.py b/lab/views_student.py
+index d71d687..300c37a 100644
+--- a/lab/views_student.py
++++ b/lab/views_student.py
+@@ -1,13 +1,16 @@
+ import json
+ 
++from django.contrib import messages
++from django.contrib.auth.decorators import login_required
+ from django.http import JsonResponse
+-from django.shortcuts import get_object_or_404, render
++from django.shortcuts import get_object_or_404, redirect, render
+ from django.utils import timezone
+ from django.views.decorators.http import require_POST
+ 
+ from . import access
+ from .feedback import attempt_report
+-from .models import Assignment, Attempt, Experiment, ExperimentFeedback, Role
++from .forms import JoinClassForm
++from .models import Assignment, Attempt, Enrollment, Experiment, ExperimentFeedback, Role
+ from .permissions import audit, get_attempt_or_403, role_required
+ 
+ 
+@@ -29,6 +32,26 @@ def _summary(a, attempts):
+     return {'a': a, 'attempts': attempts, 'best': best, 'state': state, 'used': len(done), 'can_start': len(done) < a.max_attempts and a.is_open and timezone.now() >= a.opens_at}
+ 
+ 
++@login_required
++def join_class(request):
++    """A signed-in student joins a batch with its class code (the AltVivo-era replacement for sign-up with a code)."""
++    u = request.user
++    if u.role != Role.STUDENT:
++        return render(request, 'lab/message.html', {'code': 403, 'title': 'For student accounts', 'text': 'Class codes are for students. Faculty share them from the batch page.'}, status=403)
++    form = JoinClassForm(request.POST or None, initial={'code': request.GET.get('code', '')})
++    if request.method == 'POST' and form.is_valid():
++        batch = form.batch
++        _, created = Enrollment.objects.get_or_create(batch=batch, student=u, defaults={'via': 'class_code'})
++        if created:
++            audit(request, 'class_joined', u.username, college=batch.college, batch=batch.pk)
++            messages.success(request, f'You have joined {batch.name}.')
++        else:
++            messages.info(request, f'You are already in {batch.name}.')
++        return redirect('student_dashboard')
++    return render(request, 'lab/form_page.html', {'form': form, 'title': 'Join a class', 'back': '/student/',
++                                                  'help': 'Enter the class code from your faculty to see their assignments.'})
++
++
+ @role_required(Role.STUDENT)
+ def dashboard(request):
+     u = request.user
 diff --git a/requirements.txt b/requirements.txt
 index e17dea8..e06f5d1 100644
 --- a/requirements.txt
