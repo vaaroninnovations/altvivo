@@ -238,9 +238,9 @@ export default async function publicRoutes(app: FastifyInstance, d: Deps) {
     const emailAddr = account?.email.toLowerCase() ?? body.email;
     const daily = await d.limiter.hit('trial-email', emailAddr, 3, 86_400).catch(() => ({ allowed: true, retryAfterSeconds: 0 }));
     if (!daily.allowed) throw tooMany(daily.retryAfterSeconds);
-    const available = await trialAppIds(d);
-    const appIds = body.apps?.length ? available.filter((a) => body.apps!.includes(a)) : available;
-    if (!appIds.length) throw badRequest('NO_APPLICATION', 'Choose at least one available application');
+    // The free month covers every open application; `apps` from older forms is ignored.
+    const appIds = await trialAppIds(d);
+    if (!appIds.length) throw badRequest('NO_APPLICATION', 'No application is open for a free month right now');
 
     const duplicate = async () => {
       const existing = await d.prisma.trialRequest.findFirst({ where: { email: emailAddr, status: { not: 'DECLINED' } } });

@@ -1,4 +1,4 @@
-From 0f27a3747d60fa44ccaa671e9377afe9b7724d1a Mon Sep 17 00:00:00 2001
+From dfb13cac648073dabe347989deea3148f558328e Mon Sep 17 00:00:00 2001
 From: AltVivo-Integration <integration@altvivo.invalid>
 Date: Sun, 15 Nov 2026 06:58:27 +0530
 Subject: [PATCH] AltVivo SSO with paid-entitlement gate; container image;
@@ -16,12 +16,13 @@ Subject: [PATCH] AltVivo SSO with paid-entitlement gate; container image;
  .dockerignore                           |  13 +
  Dockerfile                              |  39 ++
  config/settings.py                      |  15 +
- lab/altvivo_sso_middleware.py           | 480 ++++++++++++++++++++++++
+ lab/altvivo_sso_middleware.py           | 496 ++++++++++++++++++++++++
  lab/migrations/0013_user_altvivo_sub.py |  16 +
  lab/models.py                           |   2 +
- lab/tests_altvivo.py                    | 213 +++++++++++
+ lab/tests_altvivo.py                    | 239 ++++++++++++
+ lab/views_staff.py                      |   2 +-
  requirements.txt                        |   5 +-
- 8 files changed, 782 insertions(+), 1 deletion(-)
+ 9 files changed, 825 insertions(+), 2 deletions(-)
  create mode 100644 .dockerignore
  create mode 100644 Dockerfile
  create mode 100644 lab/altvivo_sso_middleware.py
@@ -117,10 +118,10 @@ index 211f4b6..becf2dd 100644
 +    SITE_URL = env('ALTVIVO_PUBLIC_ORIGIN', SITE_URL)
 diff --git a/lab/altvivo_sso_middleware.py b/lab/altvivo_sso_middleware.py
 new file mode 100644
-index 0000000..5abc227
+index 0000000..d9824d7
 --- /dev/null
 +++ b/lab/altvivo_sso_middleware.py
-@@ -0,0 +1,480 @@
+@@ -0,0 +1,496 @@
 +"""AltVivo single sign-on and paid-entitlement gate for XPRISM.
 +
 +Active when ALTVIVO_JWKS_URL is set (config/settings.py). Layer 2 of the
@@ -407,7 +408,7 @@ index 0000000..5abc227
 +                    username = f'{base[:140]}+av{n}'
 +                first, _, last = str(claims.get('name') or '').partition(' ')
 +                user = User(username=username, email=email, first_name=first[:150], last_name=last[:150],
-+                            role=Role.STUDENT, altvivo_sub=sub, occupation=_occupation(claims.get('role')))
++                            role=_lab_role(claims.get('role')), altvivo_sub=sub, occupation=_occupation(claims.get('role')))
 +                user.set_unusable_password()
 +                if verified:
 +                    user.email_verified, user.email_verified_at = True, timezone.now()
@@ -430,18 +431,34 @@ index 0000000..5abc227
 +        user.is_trial_account = False
 +        changed.append('is_trial_account')
 +    role = claims.get('role')
++    # Accounts XPRISM itself manages (own password, or placed in a college by
++    # its admins) keep the role XPRISM gave them. Accounts that exist only
++    # through AltVivo follow the role chosen at altvivo.bio.
++    sso_only = not user.has_usable_password() and not user.is_superuser and user.college_id is None
 +    if role == 'SUPERADMIN' and claims.get('mfa') is True and user.role != Role.SUPERADMIN:
 +        user.role = Role.SUPERADMIN
 +        changed.append('role')
 +    elif role != 'SUPERADMIN' and user.role == Role.SUPERADMIN and not user.has_usable_password() and not user.is_superuser:
-+        user.role = Role.STUDENT  # promoted only through SSO: demote with the AltVivo role
++        user.role = _lab_role(role)  # promoted only through SSO: demote with the AltVivo role
 +        changed.append('role')
++    elif role != 'SUPERADMIN' and sso_only and user.role in (Role.STUDENT, Role.FACULTY) and user.role != _lab_role(role):
++        user.role = _lab_role(role)
++        changed.append('role')
++    if 'role' in changed and user.occupation != _occupation(role):
++        user.occupation = _occupation(role)
++        changed.append('occupation')
 +    if verified and not user.email_verified and user.email.lower() == email:
 +        user.email_verified, user.email_verified_at = True, timezone.now()
 +        changed += ['email_verified', 'email_verified_at']
 +    if changed:
 +        user.save(update_fields=changed + (['is_staff'] if 'role' in changed else []))
 +    return user
++
++
++def _lab_role(role):
++    """XPRISM role for an AltVivo role: students stay students, everyone else teaches."""
++    from .models import Role
++    return Role.STUDENT if role == 'STUDENT' else Role.FACULTY
 +
 +
 +def _occupation(role):
@@ -638,10 +655,10 @@ index 2cf1fc7..f2b2669 100644
      def display_name(self):
 diff --git a/lab/tests_altvivo.py b/lab/tests_altvivo.py
 new file mode 100644
-index 0000000..ba140e7
+index 0000000..e6de9c9
 --- /dev/null
 +++ b/lab/tests_altvivo.py
-@@ -0,0 +1,213 @@
+@@ -0,0 +1,239 @@
 +"""Tests for lab/altvivo_sso_middleware.py (AltVivo SSO + paid gate).
 +
 +Run with SSO switched on; the tests write their own JWKS to that path:
@@ -758,7 +775,7 @@ index 0000000..ba140e7
 +        tok, claims = token()
 +        r = self.get('/modules/', tok)
 +        u = User.objects.get(pk=self.uid())
-+        self.assertEqual((u.username, u.altvivo_sub, u.role, u.is_trial_account), ('priya@uni.edu.in', claims['sub'], Role.STUDENT, False))
++        self.assertEqual((u.username, u.altvivo_sub, u.role, u.is_trial_account), ('priya@uni.edu.in', claims['sub'], Role.FACULTY, False))
 +        self.assertFalse(u.has_usable_password())
 +        self.assertTrue(u.has_full_access)
 +        self.assertEqual(str(u.subscribed_until), time.strftime('%Y-%m-%d', time.gmtime(claims['entitlements']['xprism']['expires_at'])))
@@ -779,7 +796,33 @@ index 0000000..ba140e7
 +    def test_superadmin_requires_mfa_for_platform_admin_role(self):
 +        tok, _ = token(role='SUPERADMIN', mfa=False, entitlements={})
 +        self.get('/modules/', tok)
-+        self.assertEqual(User.objects.get(pk=self.uid()).role, Role.STUDENT)
++        self.assertNotEqual(User.objects.get(pk=self.uid()).role, Role.SUPERADMIN)
++
++    def test_altvivo_role_decides_student_or_faculty(self):
++        for role, want in (('STUDENT', Role.STUDENT), ('RESEARCHER', Role.FACULTY), ('PI', Role.FACULTY), ('INSTITUTE_ADMIN', Role.FACULTY)):
++            self.c = Client(HTTP_HOST=HOST)
++            tok, _ = token(role=role, email=f'{role.lower()}@uni.edu.in')
++            self.get('/modules/', tok)
++            self.assertEqual(User.objects.get(pk=self.uid()).role, want, role)
++
++    def test_sso_account_follows_altvivo_role_changes(self):
++        tok, claims = token(role='RESEARCHER')
++        self.get('/modules/', tok)
++        u = User.objects.get(pk=self.uid())
++        u.role = Role.STUDENT  # as created before AltVivo roles were honoured
++        u.save(update_fields=['role'])
++        tok, _ = token(sub=claims['sub'], role='RESEARCHER')
++        self.get('/modules/', tok)
++        u.refresh_from_db()
++        self.assertEqual((u.role, u.occupation), (Role.FACULTY, 'researcher'))
++
++    def test_college_managed_role_is_left_alone(self):
++        college = College.objects.create(name='Dev College', code='dev')
++        mine = User.objects.create_user('stu1', email='priya@uni.edu.in', password='Pw-123456789', role=Role.STUDENT, college=college, email_verified=True)
++        tok, _ = token(role='RESEARCHER')
++        self.get('/modules/', tok)
++        mine.refresh_from_db()
++        self.assertEqual(mine.role, Role.STUDENT)
 +
 +    def test_expired_token_bounces_once_then_signs_in_again(self):
 +        now = int(time.time())
@@ -855,6 +898,19 @@ index 0000000..ba140e7
 +        self.assertEqual(page.content.count(b'<altvivo-topbar'), 1)
 +        r = self.c.post('/accounts/logout/', secure=True)
 +        self.assertEqual(r['Location'], 'https://altvivo.bio/logout?next=https%3A%2F%2Fxprism.altvivo.bio%2F')
+diff --git a/lab/views_staff.py b/lab/views_staff.py
+index 07936b1..28553a4 100644
+--- a/lab/views_staff.py
++++ b/lab/views_staff.py
+@@ -38,7 +38,7 @@ def batch_list(request):
+     show_archived = request.GET.get('archived') == '1'
+     bs = batches_for(request.user).filter(archived=show_archived).annotate(n_students=Count('enrollments', distinct=True), n_assign=Count('assignments', distinct=True)).prefetch_related('faculty')
+     return render(request, 'lab/batch_list.html', {'batches': bs, 'show_archived': show_archived,
+-                                                   'can_create': request.user.role in (Role.FACULTY, Role.COLLEGE_ADMIN)})
++                                                   'can_create': request.user.role in (Role.FACULTY, Role.COLLEGE_ADMIN) and request.user.college_id is not None})
+ 
+ 
+ @role_required(Role.FACULTY, Role.COLLEGE_ADMIN)
 diff --git a/requirements.txt b/requirements.txt
 index e17dea8..e06f5d1 100644
 --- a/requirements.txt

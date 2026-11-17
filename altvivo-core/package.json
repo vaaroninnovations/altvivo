@@ -17,6 +17,7 @@
     "start": "node dist/index.js",
     "test": "vitest run",
     "cli:create-superadmin": "node dist/cli/create-superadmin.js",
+    "cli:trials-all-apps": "node dist/cli/trials-all-apps.js",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
     "db:deploy": "node db/scripts/deploy.mjs",

@@ -40,6 +40,55 @@ export async function trialForEmail(d: Deps, email: string): Promise<TrialReques
   return rows.find((r) => r.status !== 'DECLINED') ?? rows[0] ?? null;
 }
 
+/** Apps a running free month holds a licence for: everything a person could open, including apps briefly in maintenance. */
+const grantableApps = (tx: Tx) =>
+  tx.appRegistry.findMany({ where: { status: { in: ['LIVE', 'BETA', 'MAINTENANCE'] } }, orderBy: { sortOrder: 'asc' }, select: { appId: true } });
+
+/**
+ * Brings every free month up to "all applications": running ones get a licence
+ * for each open app they lack (ending with the free month), and waiting ones
+ * (pending or approved) list every app. Idempotent. Returns the users whose
+ * access changed, so their sign-in claims can be refreshed.
+ */
+export async function extendTrialsToAllApps(tx: Tx): Promise<{ users: string[]; licences: number; requests: number }> {
+  const now = new Date();
+  const open = await grantableApps(tx);
+  const all = open.map((a) => a.appId);
+  const users = new Set<string>();
+  let licences = 0;
+  const running = await tx.trialRequest.findMany({ where: { status: 'ACTIVE', endsAt: { gt: now }, userId: { not: null }, decidedBy: { not: null } } });
+  for (const r of running) {
+    const have = new Set(
+      (await tx.appEntitlement.findMany({ where: { userId: r.userId!, reference: trialReference(r.id) }, select: { appId: true } })).map((e) => e.appId),
+    );
+    const missing = all.filter((a) => !have.has(a));
+    for (const appId of missing) {
+      await tx.appEntitlement.create({
+        data: {
+          appId, source: 'MANUAL', userId: r.userId!, grantedBy: r.decidedBy!, startsAt: now, expiresAt: r.endsAt!,
+          reason: `One month free (${r.days} days), request ${r.id}: extended to every application`, reference: trialReference(r.id),
+        },
+      });
+      licences++;
+    }
+    if (missing.length) {
+      users.add(r.userId!);
+      await audit(tx, 'TRIAL.EXTENDED', r.id, { user_id: r.userId, apps: missing, ends_at: r.endsAt!.toISOString() });
+    }
+    if (missing.length || r.appIds.length !== all.length || !all.every((a) => r.appIds.includes(a))) {
+      await tx.trialRequest.update({ where: { id: r.id }, data: { appIds: Array.from(new Set([...r.appIds, ...all])) } });
+    }
+  }
+  const waiting = await tx.trialRequest.findMany({ where: { status: { in: ['PENDING', 'APPROVED'] } }, select: { id: true, appIds: true } });
+  let requests = 0;
+  for (const r of waiting) {
+    if (all.every((a) => r.appIds.includes(a))) continue;
+    await tx.trialRequest.update({ where: { id: r.id }, data: { appIds: Array.from(new Set([...r.appIds, ...all])) } });
+    requests++;
+  }
+  return { users: [...users], licences, requests };
+}
+
 /**
  * Grants the licences of an approved request to `userId`, starting now.
  * Runs inside the caller's audited transaction. The licences are MANUAL
@@ -50,7 +99,8 @@ export async function activateTrial(tx: Tx, request: TrialRequest, userId: strin
   if (!request.decidedBy) throw new Error('trial request has no approver');
   const startsAt = new Date();
   const endsAt = new Date(startsAt.getTime() + request.days * 86_400_000);
-  const open = await tx.appRegistry.findMany({ where: { appId: { in: request.appIds }, status: { in: ['LIVE', 'BETA', 'MAINTENANCE'] } }, select: { appId: true } });
+  // A free month covers every application that is open, whatever was ticked on the request.
+  const open = await grantableApps(tx);
   for (const { appId } of open) {
     await tx.appEntitlement.create({
       data: {
@@ -59,7 +109,7 @@ export async function activateTrial(tx: Tx, request: TrialRequest, userId: strin
       },
     });
   }
-  const updated = await tx.trialRequest.update({ where: { id: request.id }, data: { status: 'ACTIVE', userId, startsAt, endsAt } });
+  const updated = await tx.trialRequest.update({ where: { id: request.id }, data: { status: 'ACTIVE', userId, startsAt, endsAt, appIds: open.map((a) => a.appId) } });
   await audit(tx, 'TRIAL.ACTIVATED', request.id, { user_id: userId, apps: open.map((a) => a.appId), days: request.days, ends_at: endsAt.toISOString() });
   return updated;
 }

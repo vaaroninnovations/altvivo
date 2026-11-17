@@ -1,5 +1,7 @@
 import { authenticator } from 'otplib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { systemActor, withAudit } from '../src/lib/audit.js';
+import { extendTrialsToAllApps, trialReference } from '../src/services/trials.js';
 import { Browser, createTestContext, type TestContext } from './helpers.js';
 
 let ctx: TestContext;
@@ -86,7 +88,8 @@ describe('one month free', () => {
     expect(first.statusCode).toBe(201);
     expect(json(first)).toEqual({ status: 'received' });
     const row = await ctx.deps.prisma.trialRequest.findFirstOrThrow({ where: { email: 'new.person@lab.edu' } });
-    expect(row).toMatchObject({ status: 'PENDING', appIds: ['xprism'], days: 30, userId: null });
+    // Ticking one app on an older form still asks for every open application.
+    expect(row).toMatchObject({ status: 'PENDING', appIds: ['xprism', 'amaze'], days: 30, userId: null });
     expect(ctx.mailer.lastTo('new.person@lab.edu')!.subject).toMatch(/one month free/i);
     expect(ctx.mailer.lastTo('support@altvivo.bio')!.subject).toMatch(/free month/i);
     const inbox = await ctx.deps.prisma.mailMessage.findFirstOrThrow({ where: { trialRequestId: row.id } });
@@ -129,9 +132,9 @@ describe('one month free', () => {
     const left = (new Date(x.entitlement.expiresAt).getTime() - Date.now()) / 86_400_000;
     expect(left).toBeGreaterThan(29.9);
     expect(left).toBeLessThanOrEqual(30);
-    // Only the application that was asked for.
-    expect(ws.apps.find((a: { appId: string }) => a.appId === 'amaze').entitlement.active).toBe(false);
-    expect(ws.trial).toMatchObject({ status: 'ACTIVE', ended: false, appIds: ['xprism'] });
+    // Every open application, not only the one that was ticked.
+    expect(ws.apps.find((a: { appId: string }) => a.appId === 'amaze').entitlement).toMatchObject({ active: true, source: 'trial' });
+    expect(ws.trial).toMatchObject({ status: 'ACTIVE', ended: false, appIds: ['xprism', 'amaze'] });
     const session = json(await b.request('GET', '/v1/auth/session'));
     expect(session.user.tier).toBe('TRIAL');
     expect(session.user.entitlements.xprism.source).toBe('trial');
@@ -143,11 +146,43 @@ describe('one month free', () => {
     });
     expect(gate.statusCode).toBe(200);
     expect(gate.headers['x-altvivo-access']).toBe('trial');
-    const denied = await ctx.app.inject({
+    const amaze = await ctx.app.inject({
       method: 'GET', url: '/v1/auth/verify?app=amaze',
       headers: { cookie: `altvivo_at=${b.get('altvivo_at')}`, 'x-forwarded-host': 'amaze.altvivo.bio', 'x-forwarded-uri': '/', 'x-forwarded-method': 'GET', accept: 'application/json' },
     });
-    expect(denied.statusCode).toBe(403);
+    expect(amaze.statusCode).toBe(200);
+  });
+
+  it('extends free months that started with fewer applications to every app', async () => {
+    const { id: userId } = await verifiedUser('older-trial@lab.edu');
+    const startsAt = new Date();
+    const endsAt = new Date(startsAt.getTime() + 20 * 86_400_000);
+    const old = await withAudit(ctx.deps.prisma, systemActor(), async (tx) => {
+      const r = await tx.trialRequest.create({
+        data: {
+          name: 'Dr Older Trial', email: 'older-trial@lab.edu', institution: 'Test College', useCase: 'Started before every app was included.',
+          appIds: ['xprism'], status: 'ACTIVE', days: 30, userId, decidedBy: admin.id, decidedAt: startsAt, startsAt, endsAt,
+        },
+      });
+      await tx.appEntitlement.create({
+        data: { appId: 'xprism', source: 'MANUAL', userId, grantedBy: admin.id, startsAt, expiresAt: endsAt, reason: 'old free month', reference: trialReference(r.id) },
+      });
+      return r;
+    });
+    const pending = await ctx.deps.prisma.trialRequest.create({
+      data: { name: 'Dr Waiting', email: 'waiting@lab.edu', institution: 'Test College', useCase: 'Asked for one app only.', appIds: ['amaze'] },
+    });
+
+    const first = await withAudit(ctx.deps.prisma, systemActor(), (tx) => extendTrialsToAllApps(tx));
+    expect(first.users).toContain(userId);
+    const amaze = await ctx.deps.prisma.appEntitlement.findFirstOrThrow({ where: { userId, appId: 'amaze', reference: trialReference(old.id) } });
+    expect(amaze.expiresAt?.getTime()).toBe(endsAt.getTime());
+    expect((await ctx.deps.prisma.trialRequest.findUniqueOrThrow({ where: { id: old.id } })).appIds.sort()).toEqual(['amaze', 'xprism']);
+    expect((await ctx.deps.prisma.trialRequest.findUniqueOrThrow({ where: { id: pending.id } })).appIds.sort()).toEqual(['amaze', 'xprism']);
+
+    // Running it again changes nothing.
+    const again = await withAudit(ctx.deps.prisma, systemActor(), (tx) => extendTrialsToAllApps(tx));
+    expect(again).toEqual({ users: [], licences: 0, requests: 0 });
   });
 
   it('starts at once for a verified account and allows only one free month per address', async () => {

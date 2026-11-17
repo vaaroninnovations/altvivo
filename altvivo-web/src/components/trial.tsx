@@ -112,13 +112,11 @@ export function TrialRequestForm({
   onSent?: (trial: Trial | null) => void;
 }) {
   const [form, setForm] = useState({ name: defaultName, email: defaultEmail, institution: defaultInstitution, designation: "", useCase: "", website: "" });
-  const [chosen, setChosen] = useState<string[]>(apps.map((a) => a.appId));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<"received" | "already_requested" | null>(null);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
-  const toggle = (id: string) => setChosen((c) => (c.includes(id) ? c.filter((x) => x !== id) : [...c, id]));
 
   async function submit(ev: FormEvent) {
     ev.preventDefault();
@@ -127,7 +125,6 @@ export function TrialRequestForm({
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email)) e.email = "Enter a valid email address";
     if (form.institution.trim().length < 2) e.institution = "Enter your college, university or organisation";
     if (form.useCase.trim().length < 10) e.useCase = "Tell us in a sentence or two how you will use it";
-    if (!chosen.length) e.apps = "Choose at least one application";
     setErrors(e);
     if (Object.keys(e).length) return;
     setBusy(true);
@@ -135,7 +132,7 @@ export function TrialRequestForm({
     try {
       const r = await api<{ status: "received" | "already_requested"; trial?: Trial }>("/v1/public/trial-request", {
         method: "POST",
-        body: { name: form.name, email: form.email, institution: form.institution, designation: form.designation || null, apps: chosen, useCase: form.useCase, website: form.website },
+        body: { name: form.name, email: form.email, institution: form.institution, designation: form.designation || null, useCase: form.useCase, website: form.website },
       });
       setDone(r.status);
       onSent?.(r.trial ?? null);
@@ -204,21 +201,12 @@ export function TrialRequestForm({
         </Field>
       </div>
 
-      <fieldset>
-        <legend className="text-sm font-medium text-fg">Applications to try</legend>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {apps.map((a) => {
-            const on = chosen.includes(a.appId);
-            return (
-              <label key={a.appId} className={cx("flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 text-sm transition", on ? "border-accent/60 bg-accent-soft" : "border-line bg-surface hover:border-line-strong")}>
-                <input type="checkbox" className="size-4 accent-[var(--accent)]" checked={on} onChange={() => toggle(a.appId)} />
-                <span className="font-medium">{a.name}</span>
-              </label>
-            );
-          })}
-        </div>
-        {errors.apps && <p className="mt-1.5 text-xs text-danger">{errors.apps}</p>}
-      </fieldset>
+      <div>
+        <p className="text-sm font-medium text-fg">Included</p>
+        <p className="mt-1 text-sm text-muted">
+          {apps.length ? apps.map((a) => a.name).join(" and ") : "Every live application"}: the free month covers every application on AltVivo.
+        </p>
+      </div>
 
       <Field label="How will you use AltVivo?" id="tr-use" error={errors.useCase} hint="For example: the course or study, how many students or colleagues, and when you plan to start.">
         <textarea id="tr-use" rows={4} className="field" value={form.useCase} onChange={set("useCase")} maxLength={2000} aria-invalid={!!errors.useCase} />

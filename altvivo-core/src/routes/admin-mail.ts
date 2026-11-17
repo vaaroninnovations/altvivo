@@ -9,7 +9,7 @@ import { HttpError, badRequest, conflict, notFound, pgCode, unauthorized } from 
 import { templates } from '../lib/mailer.js';
 import { actorOf, parse, requireUser } from '../plugins/security.js';
 import { deliverToInbox, mailCounts, threadForInbound, toMailSummary } from '../services/mailbox.js';
-import { activateTrial } from '../services/trials.js';
+import { activateTrial, trialAppIds } from '../services/trials.js';
 import { signature, totpCode } from './admin.js';
 import { assertTotp } from './auth.js';
 
@@ -314,15 +314,16 @@ export default async function adminMailRoutes(app: FastifyInstance, d: Deps) {
     const account = await d.prisma.user.findUnique({ where: { email: before.email }, select: { id: true, emailVerifiedAt: true, disabledAt: true } });
     if (account?.disabledAt) throw conflict('ACCOUNT_SUSPENDED', 'The account for this address is suspended');
     const days = body.days ?? d.cfg.TRIAL_DAYS;
+    const everyApp = Array.from(new Set([...(await trialAppIds(d)), ...before.appIds]));
     let request;
     try {
       request = await withAudit(d.prisma, actorOf(req), async (tx) => {
         const claimed = await tx.trialRequest.updateMany({
           where: { id, status: 'PENDING' },
-          data: { status: 'APPROVED', days, decidedBy: claims.sub, decidedAt: new Date(), decisionNote: body.note ?? null, userId: account?.id ?? before.userId },
+          data: { status: 'APPROVED', days, appIds: everyApp, decidedBy: claims.sub, decidedAt: new Date(), decisionNote: body.note ?? null, userId: account?.id ?? before.userId },
         });
         if (claimed.count !== 1) throw conflict('ALREADY_DECIDED', 'This request was already decided');
-        await audit(tx, 'ADMIN.TRIAL_APPROVED', id, { signature: signature(claims), days, apps: before.appIds, note: body.note ?? null });
+        await audit(tx, 'ADMIN.TRIAL_APPROVED', id, { signature: signature(claims), days, apps: everyApp, note: body.note ?? null });
         const approved = await tx.trialRequest.findUniqueOrThrow({ where: { id } });
         return account?.emailVerifiedAt ? activateTrial(tx, approved, account.id) : approved;
       });
