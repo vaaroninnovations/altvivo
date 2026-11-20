@@ -345,6 +345,7 @@ describe('SUPERADMIN creates users', () => {
 
     // The emailed link sets the password and verifies the address.
     const mail = ctx.mailer.lastTo('invitee@lab.org')!;
+    expect(mail).toMatchObject({ sender: 'hello' });
     expect(mail.subject).toContain('account is ready');
     const invitee = new Browser(ctx.app);
     await invitee.csrf();

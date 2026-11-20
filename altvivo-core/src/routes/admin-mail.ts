@@ -67,7 +67,8 @@ const PAGE = 50;
 export default async function adminMailRoutes(app: FastifyInstance, d: Deps) {
   const superadmin = requireUser(d, { roles: ['SUPERADMIN'], mfa: true });
   const opts = { config: { rateLimit: 'api' as const }, preHandler: superadmin };
-  const sender = /<([^>]+)>/.exec(d.cfg.SMTP_FROM)?.[1] ?? d.cfg.SUPPORT_EMAIL;
+  // Mailbox mail is two-way: it goes out from hello@, where replies come back in.
+  const sender = d.cfg.replyAddress;
 
   // =============================================================== mailbox ==
   app.get('/v1/api/admin/mail', opts, async (req) => {
@@ -158,7 +159,7 @@ export default async function adminMailRoutes(app: FastifyInstance, d: Deps) {
     if (!body.subject) throw badRequest('SUBJECT_REQUIRED', 'Add a subject');
     if (body.body.trim().length < 1) throw badRequest('BODY_REQUIRED', 'Write a message');
     try {
-      await d.mailer.send({ to: body.to.join(', '), ...(body.cc.length ? { cc: body.cc } : {}), replyTo: d.cfg.SUPPORT_EMAIL, ...templates.adminMessage(body.subject, body.body) });
+      await d.mailer.send({ to: body.to.join(', '), ...(body.cc.length ? { cc: body.cc } : {}), sender: 'hello', ...templates.adminMessage(body.subject, body.body) });
     } catch (err) {
       req.log.warn({ err }, 'mailbox send failed');
       const draft = await save({ ...fields, folder: 'DRAFT', deliveryError: String((err as Error).message ?? err).slice(0, 500) });

@@ -262,7 +262,8 @@ describe('SuperAdmin mailbox', () => {
     const sent = json(r).message;
     expect(sent).toMatchObject({ folder: 'SENT', toEmails: ['asha@college.edu'], ccEmails: ['sales@altvivo.bio'], inReplyTo: contactMailId });
     const delivered = ctx.mailer.lastTo('asha@college.edu')!;
-    expect(delivered).toMatchObject({ subject: 'Re: Quote for 60 seats', cc: ['sales@altvivo.bio'], replyTo: 'support@altvivo.bio' });
+    expect(delivered).toMatchObject({ subject: 'Re: Quote for 60 seats', cc: ['sales@altvivo.bio'], sender: 'hello' });
+    expect(sent.fromEmail).toBe('hello@altvivo.bio');
     expect(delivered.html).toContain('Dear Asha,');
 
     const thread = json(await admin.b.request('GET', `/v1/api/admin/mail/${sent.id}`)).thread;

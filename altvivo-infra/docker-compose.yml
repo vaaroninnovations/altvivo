@@ -319,7 +319,12 @@ services:
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # One-way: automated mail. Mail sent to no-reply@ is rejected by the inbound email worker.
       SMTP_FROM: ${SMTP_FROM:-AltVivo <no-reply@altvivo.bio>}
+      # Two-way: admin mailbox messages and account invites; replies land in the SuperAdmin Mailbox.
+      SMTP_REPLY_FROM: ${SMTP_REPLY_FROM:-AltVivo <hello@altvivo.bio>}
+      # Shared with the Cloudflare email worker (altvivo-infra/email-worker); empty disables inbound mail.
+      MAIL_INBOUND_TOKEN: ${MAIL_INBOUND_TOKEN:-}
       SUPPORT_EMAIL: ${SUPPORT_EMAIL:-support@altvivo.bio}
       # Advisory-board portraits (public R2 bucket behind a CDN); empty = paste URLs instead.
       R2_BUCKET_PUBLIC: ${R2_BUCKET_PUBLIC:-}

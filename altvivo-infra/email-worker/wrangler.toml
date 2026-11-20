@@ -1,0 +1,13 @@
+name = "altvivo-inbound-mail"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+[vars]
+# Two-way addresses delivered to the Mailbox (first one is quoted in bounces).
+INBOX_ADDRESSES = "hello@altvivo.bio,support@altvivo.bio"
+INBOUND_URL = "https://api.altvivo.bio/v1/webhooks/mail/inbound"
+# Optional: also forward hello@ mail to a personal inbox (must be a verified
+# destination address in Email Routing). Leave empty to keep it in the Mailbox only.
+FORWARD_TO = ""
+
+# Secret (not in this file): wrangler secret put MAIL_INBOUND_TOKEN

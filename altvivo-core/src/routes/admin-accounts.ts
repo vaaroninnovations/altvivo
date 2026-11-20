@@ -168,7 +168,7 @@ export default async function adminAccountRoutes(app: FastifyInstance, d: Deps) 
     let emailSent = false;
     if (body.sendInvite) {
       emailSent = await d.mailer
-        .send({ to: user.email, ...templates.accountInvite(user.fullName, setupLink, INVITE_DAYS) })
+        .send({ to: user.email, sender: 'hello', ...templates.accountInvite(user.fullName, setupLink, INVITE_DAYS) })
         .then(() => true)
         .catch((err) => {
           req.log.error({ err }, 'invite email failed');

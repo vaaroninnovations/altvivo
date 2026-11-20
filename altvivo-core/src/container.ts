@@ -30,7 +30,7 @@ export async function createDeps(cfg: Config, o: Overrides = {}): Promise<Deps> 
   const tokens = await TokenService.create(cfg);
   const cookies = new CookieManager(cfg);
   const revocations = new RevocationStore(redis, cfg.ACCESS_TOKEN_TTL_SECONDS);
-  configureMailBrand({ webOrigin: cfg.webOrigin, supportEmail: cfg.SUPPORT_EMAIL, legalName: cfg.SELLER_LEGAL_NAME });
+  configureMailBrand({ webOrigin: cfg.webOrigin, supportEmail: cfg.SUPPORT_EMAIL, replyEmail: cfg.replyAddress, legalName: cfg.SELLER_LEGAL_NAME });
   const mailer = o.mailer ?? new SmtpMailer(cfg);
   return {
     cfg,

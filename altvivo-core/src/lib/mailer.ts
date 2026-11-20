@@ -10,6 +10,12 @@ export interface MailMessage {
   replyTo?: string;
   /** Validated addresses only (mailbox compose). */
   cc?: string[];
+  /**
+   * 'hello' = a two-way message people may answer (admin mailbox, account
+   * invites): sent from SMTP_REPLY_FROM with replies going back there.
+   * Default 'noreply' = one-way, automated mail from SMTP_FROM.
+   */
+  sender?: 'hello' | 'noreply';
 }
 
 export interface Mailer {
@@ -31,8 +37,18 @@ export class SmtpMailer implements Mailer {
     });
   }
 
-  async send(msg: MailMessage): Promise<void> {
-    await this.transport.sendMail({ from: this.cfg.SMTP_FROM, ...msg });
+  async send({ sender = 'noreply', ...msg }: MailMessage): Promise<void> {
+    if (sender === 'hello') {
+      await this.transport.sendMail({ from: this.cfg.SMTP_REPLY_FROM, replyTo: this.cfg.SMTP_REPLY_FROM, ...msg });
+      return;
+    }
+    await this.transport.sendMail({
+      from: this.cfg.SMTP_FROM,
+      ...msg,
+      text: `${msg.text}\n\n--\nThis address does not accept replies. To contact AltVivo, write to ${brand.replyEmail}.`,
+      // RFC 3834: tells mail systems not to send auto-replies (vacation notices) back.
+      headers: { 'Auto-Submitted': 'auto-generated' },
+    });
   }
 }
 
@@ -40,7 +56,7 @@ const escapeHtml = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
 /** Brand settings for every email (set once at start-up from the configuration). */
-const brand = { webOrigin: 'https://altvivo.bio', supportEmail: 'support@altvivo.bio', legalName: 'Aaron Innovations' };
+const brand = { webOrigin: 'https://altvivo.bio', supportEmail: 'support@altvivo.bio', replyEmail: 'hello@altvivo.bio', legalName: 'Aaron Innovations' };
 export function configureMailBrand(b: Partial<typeof brand>): void {
   Object.assign(brand, Object.fromEntries(Object.entries(b).filter(([, v]) => !!v)));
 }
@@ -55,8 +71,9 @@ const FONT = "'IBM Plex Sans','Segoe UI',Helvetica,Arial,sans-serif";
  * card for the content, and a footer with the sender's identity. Table layout
  * and inline styles only, so it renders the same in Gmail, Outlook and Apple Mail.
  */
-function layout(title: string, bodyHtml: string, footer = 'You received this because of activity on your AltVivo account. If this was not you, you can ignore this email.'): string {
+function layout(title: string, bodyHtml: string, footer = 'You received this because of activity on your AltVivo account. If this was not you, you can ignore this email.', replyable = false): string {
   const web = brand.webOrigin;
+  const replies = replyable ? '' : `<br>This address does not accept replies. To contact us, write to <a href="mailto:${escapeHtml(brand.replyEmail)}" style="color:#4B1FD8;text-decoration:none">${escapeHtml(brand.replyEmail)}</a>.`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${escapeHtml(title)}</title></head>
 <body style="margin:0;padding:0;background:#F4F2FB;font-family:${FONT};color:${INK};-webkit-text-size-adjust:100%">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F4F2FB"><tr><td align="center" style="padding:32px 16px">
@@ -64,7 +81,7 @@ function layout(title: string, bodyHtml: string, footer = 'You received this bec
 <tr><td style="height:4px;line-height:4px;font-size:0;background:#4B1FD8;background-image:linear-gradient(90deg,#0A2BDB,#4B1FD8 55%,#9D0BEF)">&nbsp;</td></tr>
 <tr><td style="padding:24px 32px 20px;border-bottom:1px solid ${LINE}"><a href="${escapeHtml(web)}" style="text-decoration:none"><img src="${escapeHtml(web)}/brand/altvivo-wordmark.png" width="150" height="29" alt="AltVivo" style="display:block;border:0;height:29px;width:150px;color:#4B1FD8;font-size:20px;font-weight:700"></a></td></tr>
 <tr><td style="padding:32px;font-size:15px;line-height:1.65;color:${INK}"><h1 style="margin:0 0 18px;font-size:22px;line-height:1.3;font-weight:600;color:${INK}">${escapeHtml(title)}</h1>${bodyHtml}</td></tr>
-<tr><td style="padding:20px 32px;border-top:1px solid ${LINE};background:#FBFAFE;font-size:12px;line-height:1.6;color:${MUTED}">${escapeHtml(footer)}<br><br>
+<tr><td style="padding:20px 32px;border-top:1px solid ${LINE};background:#FBFAFE;font-size:12px;line-height:1.6;color:${MUTED}">${escapeHtml(footer)}${replies}<br><br>
 <strong style="color:${INK}">AltVivo</strong> · a product of ${escapeHtml(brand.legalName)}<br>
 <a href="${escapeHtml(web)}" style="color:#4B1FD8;text-decoration:none">altvivo.bio</a> · <a href="mailto:${escapeHtml(brand.supportEmail)}" style="color:#4B1FD8;text-decoration:none">${escapeHtml(brand.supportEmail)}</a> · <a href="${escapeHtml(web)}/privacy" style="color:#4B1FD8;text-decoration:none">Privacy</a> · <a href="${escapeHtml(web)}/terms" style="color:#4B1FD8;text-decoration:none">Terms</a></td></tr>
 </table></td></tr></table></body></html>`;
@@ -92,8 +109,8 @@ export const templates = {
   accountInvite(name: string, link: string, days: number): Omit<MailMessage, 'to'> {
     return {
       subject: 'Your AltVivo account is ready',
-      text: `Hi ${name},\n\nAn AltVivo administrator has created an account for you. Choose your password to activate it (valid for ${days} days, single use):\n${link}\n\nIf you were not expecting this, you can ignore this email.`,
-      html: layout('Your AltVivo account is ready', `<p>Hi ${escapeHtml(name)},</p><p>An AltVivo administrator has created an account for you. Choose your password to activate it. The link is valid for ${days} days and can be used once.</p>${button(link, 'Set your password')}<p>If you were not expecting this, you can ignore this email.</p>`),
+      text: `Hi ${name},\n\nAn AltVivo administrator has created an account for you. Choose your password to activate it (valid for ${days} days, single use):\n${link}\n\nQuestions? Just reply to this email.\n\nIf you were not expecting this, you can ignore this email.`,
+      html: layout('Your AltVivo account is ready', `<p>Hi ${escapeHtml(name)},</p><p>An AltVivo administrator has created an account for you. Choose your password to activate it. The link is valid for ${days} days and can be used once.</p>${button(link, 'Set your password')}<p>If you were not expecting this, you can ignore this email.</p>`, 'Questions? Reply to this email and the AltVivo team will get back to you.', true),
     };
   },
   securityAlert(name: string, what: string): Omit<MailMessage, 'to'> {
@@ -191,7 +208,7 @@ export const templates = {
     return {
       subject,
       text: body,
-      html: layout(subject, `<div style="white-space:pre-wrap">${escapeHtml(body)}</div>`, 'This message was sent to you by the AltVivo team. You can reply to this email.'),
+      html: layout(subject, `<div style="white-space:pre-wrap">${escapeHtml(body)}</div>`, 'This message was sent to you by the AltVivo team. You can reply to this email.', true),
     };
   },
 };

@@ -117,7 +117,10 @@ const EnvSchema = z.object({
   SMTP_PORT: z.coerce.number().int().default(587),
   SMTP_USER: z.string().default(''),
   SMTP_PASSWORD: z.string().default(''),
+  /** One-way sender for automated mail (verification, resets, receipts...). Mail sent to it is rejected. */
   SMTP_FROM: z.string().default('AltVivo <no-reply@altvivo.bio>'),
+  /** Two-way sender people can reply to: admin mailbox messages and account invites. */
+  SMTP_REPLY_FROM: z.string().default('AltVivo <hello@altvivo.bio>'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -130,6 +133,8 @@ export interface Config extends Env {
   serviceTokens: Map<string, string>; // token -> app_id
   allowedOriginSet: Set<string>;
   webOrigin: string;
+  /** Bare address of SMTP_REPLY_FROM (hello@...). */
+  replyAddress: string;
   vipRoles: Set<string>;
   /** True when every seller field needed for a GST invoice is configured. */
   invoicingEnabled: boolean;
@@ -200,6 +205,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     serviceTokens: parseServiceTokens(e.SPOKE_SERVICE_TOKENS),
     allowedOriginSet: new Set(e.ALLOWED_ORIGINS.map((o) => o.replace(/\/$/, ''))),
     webOrigin: new URL(e.PUBLIC_WEB_URL).origin,
+    replyAddress: (/<([^>]+)>/.exec(e.SMTP_REPLY_FROM)?.[1] ?? e.SMTP_REPLY_FROM).trim().toLowerCase(),
     vipRoles: new Set(e.PAID_GATE_VIP_ROLES),
     invoicingEnabled: validateSeller(e),
   };
