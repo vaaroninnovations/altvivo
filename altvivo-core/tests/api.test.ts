@@ -319,6 +319,42 @@ describe('SUPERADMIN spoke switchboard', () => {
   });
 });
 
+describe('SUPERADMIN creates users', () => {
+  it('creates an account with a signed request and the invitee sets their own password', async () => {
+    const admin = new Browser(ctx.app);
+    await register(admin, 'creator@altvivo.bio');
+    await ctx.deps.prisma.user.update({ where: { email: 'creator@altvivo.bio' }, data: { role: 'SUPERADMIN', emailVerifiedAt: new Date() } });
+    await admin.csrf();
+    await admin.request('POST', '/v1/auth/login', { email: 'creator@altvivo.bio', password: PASSWORD, turnstileToken: 'ok' });
+    const { secret } = await enrolMfa(admin);
+    const body = { email: 'Invitee@Lab.org', fullName: 'Dr Invited Person', role: 'PI', reason: 'Onboarding new PI' };
+
+    expect(json(await admin.request('POST', '/v1/api/admin/users', { ...body, totpCode: '000000' })).error.code).toBe('MFA_CODE_INVALID');
+    const r = await admin.request('POST', '/v1/api/admin/users', { ...body, totpCode: totpAt(secret, 1) });
+    expect(r.statusCode).toBe(201);
+    const created = json(r);
+    expect(created).toMatchObject({ emailSent: true, setupLinkExpiresInDays: 7 });
+    const user = await ctx.deps.prisma.user.findUniqueOrThrow({ where: { email: 'invitee@lab.org' } });
+    expect(user).toMatchObject({ id: created.userId, role: 'PI', passwordHash: null, emailVerifiedAt: null });
+    const ev = await ctx.deps.prisma.auditLog.findFirst({ where: { eventType: 'ADMIN.USER_CREATED', resourceId: user.id } });
+    expect(ev?.metadata).toMatchObject({ reason: 'Onboarding new PI', role: 'PI', signature: { method: 'totp' } });
+
+    // Same address again is refused.
+    const dup = await admin.request('POST', '/v1/api/admin/users', { ...body, totpCode: totpAt(secret, -1) });
+    expect(dup.statusCode).toBe(409);
+
+    // The emailed link sets the password and verifies the address.
+    const mail = ctx.mailer.lastTo('invitee@lab.org')!;
+    expect(mail.subject).toContain('account is ready');
+    const invitee = new Browser(ctx.app);
+    await invitee.csrf();
+    expect((await invitee.request('POST', '/v1/auth/reset-password', { token: linkToken(mail.text), password: PASSWORD })).statusCode).toBe(204);
+    expect((await ctx.deps.prisma.user.findUniqueOrThrow({ where: { id: user.id } })).emailVerifiedAt).not.toBeNull();
+    const login = await invitee.request('POST', '/v1/auth/login', { email: 'invitee@lab.org', password: PASSWORD, turnstileToken: 'ok' });
+    expect(login.statusCode).toBe(200);
+  });
+});
+
 describe('retired apps and waitlist', () => {
   it('lists only XPRISM and aMaze and has no waitlist endpoints', async () => {
     const pub = json(await ctx.app.inject({ method: 'GET', url: '/v1/public/apps' })).apps;

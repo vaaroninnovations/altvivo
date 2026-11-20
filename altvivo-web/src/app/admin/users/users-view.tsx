@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Search } from "lucide-react";
+import { Search, UserPlus } from "lucide-react";
 import { LoadState, PageHeader, Table, useAdmin } from "@/components/admin/kit";
 import { Button, Pill, formatDate } from "@/components/ui";
+import { AddUserDialog } from "./add-user-dialog";
 
 export interface AdminUserRow {
   id: string;
@@ -30,6 +31,7 @@ export function UsersView() {
   const [role, setRole] = useState("");
   const [pages, setPages] = useState<AdminUserRow[][]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const base = `/v1/api/admin/users?limit=50${query ? `&q=${encodeURIComponent(query)}` : ""}${role ? `&role=${role}` : ""}`;
   const { data, error, loading, reload } = useAdmin<{ users: AdminUserRow[]; nextCursor: string | null }>(cursor ? `${base}&cursor=${cursor}` : base);
 
@@ -49,7 +51,24 @@ export function UsersView() {
 
   return (
     <>
-      <PageHeader title="Users" description="Search accounts, change roles, suspend, reset two-factor and manage manual licences." />
+      <PageHeader
+        title="Users"
+        description="Search accounts, add users, change roles, suspend, reset two-factor and manage manual licences."
+        actions={
+          <Button onClick={() => setAdding(true)}>
+            <UserPlus className="size-4" aria-hidden /> Add user
+          </Button>
+        }
+      />
+      <AddUserDialog
+        open={adding}
+        onClose={() => setAdding(false)}
+        onCreated={() => {
+          setCursor(null);
+          setPages([]);
+          void reload();
+        }}
+      />
       <form onSubmit={search} className="mb-5 flex flex-wrap gap-3">
         <div className="relative min-w-64 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-subtle" aria-hidden />

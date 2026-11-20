@@ -11,7 +11,8 @@ import { createProforma, recordOfflinePayment } from '../services/checkout.js';
 import { assertInvoicing, draftFrom, fullCreditNote, issue, lockInvoice, toApiInvoice } from '../services/invoices.js';
 import { MFA_REQUIRED_ROLES } from '../services/sessions.js';
 import { reason, signature, SignedBody, totpCode } from './admin.js';
-import { assertTotp } from './auth.js';
+import { randomToken } from '../lib/crypto.js';
+import { assertTotp, authTokenHash } from './auth.js';
 import { ProfileFields, pdfLink } from './billing.js';
 
 const UuidParam = z.object({ id: z.string().uuid() });
@@ -27,6 +28,18 @@ const UserPatchBody = z
     totpCode,
   })
   .refine((b) => b.role || b.orgId !== undefined || b.disabled !== undefined, 'Nothing to change');
+
+const INVITE_DAYS = 7;
+const UserCreateBody = z.object({
+  email: z.string().trim().toLowerCase().email().max(254),
+  fullName: z.string().trim().min(2).max(200),
+  affiliation: z.string().trim().max(300).nullable().optional(),
+  role: z.enum(ROLES),
+  orgId: z.string().uuid().nullable().optional(),
+  sendInvite: z.boolean().default(true),
+  reason,
+  totpCode,
+});
 
 const LicenceBody = z
   .object({
@@ -114,6 +127,55 @@ export default async function adminAccountRoutes(app: FastifyInstance, d: Deps) 
       },
     });
     return { users: rows.slice(0, limit), nextCursor: rows.length > limit ? rows[limit - 1]!.id : null };
+  });
+
+  /**
+   * Create an account on someone's behalf. No password is set here: the user
+   * receives a single-use setup link (valid INVITE_DAYS); following it sets the
+   * password and proves the mailbox. MFA-required roles enrol TOTP at first sign-in.
+   */
+  app.post('/v1/api/admin/users', opts, async (req, reply) => {
+    const body = parse(UserCreateBody, req.body);
+    const claims = req.auth!;
+    await assertTotp(d, claims.sub, body.totpCode);
+    if (await d.prisma.user.findUnique({ where: { email: body.email }, select: { id: true } })) {
+      throw conflict('EMAIL_IN_USE', 'An account with this email already exists');
+    }
+    if (body.orgId && !(await d.prisma.organization.findUnique({ where: { id: body.orgId }, select: { id: true } }))) {
+      throw notFound('UNKNOWN_ORG', 'Unknown organisation');
+    }
+    const token = randomToken(32);
+    let user;
+    try {
+      user = await withAudit(d.prisma, actorOf(req), async (tx) => {
+        const u = await tx.user.create({
+          data: { email: body.email, fullName: body.fullName, affiliation: body.affiliation ?? null, role: body.role, orgId: body.orgId ?? null },
+        });
+        await tx.authToken.create({
+          data: { userId: u.id, purpose: 'PASSWORD_RESET', tokenHash: authTokenHash(d, token), expiresAt: new Date(Date.now() + INVITE_DAYS * 86_400_000) },
+        });
+        await audit(tx, 'ADMIN.USER_CREATED', u.id, {
+          signature: signature(claims), reason: body.reason, role: body.role, org_id: body.orgId ?? null, invite_emailed: body.sendInvite,
+        });
+        return u;
+      });
+    } catch (err) {
+      if (pgCode(err) === '23514') throw conflict('SEAT_LIMIT', 'That organisation has no free seats');
+      if (pgCode(err) === '23505') throw conflict('EMAIL_IN_USE', 'An account with this email already exists');
+      throw err;
+    }
+    const setupLink = `${d.cfg.webOrigin}/reset-password?token=${encodeURIComponent(token)}`;
+    let emailSent = false;
+    if (body.sendInvite) {
+      emailSent = await d.mailer
+        .send({ to: user.email, ...templates.accountInvite(user.fullName, setupLink, INVITE_DAYS) })
+        .then(() => true)
+        .catch((err) => {
+          req.log.error({ err }, 'invite email failed');
+          return false;
+        });
+    }
+    return reply.code(201).send({ userId: user.id, emailSent, setupLink, setupLinkExpiresInDays: INVITE_DAYS });
   });
 
   app.get('/v1/api/admin/users/:id', opts, async (req) => {

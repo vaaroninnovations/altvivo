@@ -89,6 +89,13 @@ export const templates = {
       html: layout('Reset your password', `<p>Hi ${escapeHtml(name)},</p><p>Use the button below to choose a new password. The link is valid for 1 hour and can be used once.</p>${button(link, 'Choose a new password')}<p>If you did not ask for this, ignore this email - your password stays the same.</p>`),
     };
   },
+  accountInvite(name: string, link: string, days: number): Omit<MailMessage, 'to'> {
+    return {
+      subject: 'Your AltVivo account is ready',
+      text: `Hi ${name},\n\nAn AltVivo administrator has created an account for you. Choose your password to activate it (valid for ${days} days, single use):\n${link}\n\nIf you were not expecting this, you can ignore this email.`,
+      html: layout('Your AltVivo account is ready', `<p>Hi ${escapeHtml(name)},</p><p>An AltVivo administrator has created an account for you. Choose your password to activate it. The link is valid for ${days} days and can be used once.</p>${button(link, 'Set your password')}<p>If you were not expecting this, you can ignore this email.</p>`),
+    };
+  },
   securityAlert(name: string, what: string): Omit<MailMessage, 'to'> {
     return {
       subject: `AltVivo security notice: ${what}`,
