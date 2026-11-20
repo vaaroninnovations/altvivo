@@ -44,6 +44,44 @@ Regards,
 The AltVivo team`,
   },
   {
+    id: "advisory-board-invite",
+    label: "Invite: Advisory Board member",
+    subject: "Invitation to Join the AltVivo Advisory Board as an Advisory Member",
+    body: `Dear [Dr./Prof. Last Name],
+
+Greetings from AltVivo!
+
+AltVivo is a platform dedicated to advancing alternatives to animal experimentation in education and research through [virtual laboratories, in-silico models, simulations and training resources]. Our goal is to support the 3Rs (Replacement, Reduction and Refinement) by giving students, educators and researchers credible, scientifically sound tools that reduce reliance on live animals.
+
+In recognition of your distinguished contributions to [field, e.g. pharmacology / toxicology / life sciences education], we are honoured to invite you to join the AltVivo Advisory Board as an Advisory Member.
+
+As an Advisory Member, you would be invited to:
+• Offer strategic guidance on the scientific direction and academic relevance of the platform
+• Review selected content or modules for scientific accuracy, as and when convenient
+• Suggest improvements, emerging research areas and collaboration opportunities
+• Help promote ethical, humane and alternative approaches in teaching and research
+• Join online advisory meetings, approximately [two] times a year
+
+This is an honorary position. It carries no financial obligation and no fixed time commitment. The term will be [two years], renewable by mutual consent.
+
+Consent for website listing
+With your permission, we would like to list you as an Advisory Member on the AltVivo website and in our official communications, with your name, title, designation, institution, a professional photograph and a short bio (50–100 words). Nothing will be published without your approval, and you may ask for your details to be updated or removed at any time.
+
+If you are happy to accept, please reply to this email by [Date] with the statement below, along with your photograph and a short bio:
+
+"I, [Full Name], [Designation] at [Institution], accept the invitation to serve as an Advisory Member of the AltVivo Advisory Board and consent to the display of my name, designation, institution, photograph and bio on the AltVivo website and official communications."
+
+We believe your expertise would be invaluable to AltVivo's mission, and we would be delighted to have you with us. Please feel free to contact me with any questions.
+
+Thank you for considering this invitation.
+
+Warm regards,
+[Your Full Name]
+[Designation, e.g. Founder & Director]
+AltVivo
+[Phone] | [Website]`,
+  },
+  {
     id: "free-month-ending",
     label: "Free month ending soon",
     subject: "Your free month on AltVivo is ending",
