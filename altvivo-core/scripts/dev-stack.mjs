@@ -122,6 +122,9 @@ const cfg = loadConfig({
 });
 
 const objects = new Map();
+// A received attachment on the seeded customer reply (Mailbox).
+const DEV_ATTACHMENT_KEY = "mail-inbound/00000000-0000-4000-8000-000000000001/GST_certificate.pdf";
+objects.set(DEV_ATTACHMENT_KEY, Buffer.alloc(18432));
 const deps = await createDeps(cfg, {
   redis: new RedisMock({ keyPrefix: cfg.REDIS_KEY_PREFIX }),
   mailer: {
@@ -252,10 +255,10 @@ This text shows how a biography with several paragraphs appears in the advisory-
     [m1.thread_id, m1.id, enquiry.id, founder.id],
   );
   await db.query(
-    `INSERT INTO mail_messages (folder, thread_id, in_reply_to, from_name, from_email, to_emails, subject, body, source, is_starred, created_at, updated_at)
+    `INSERT INTO mail_messages (folder, thread_id, in_reply_to, from_name, from_email, to_emails, subject, body, source, is_starred, attachments, created_at, updated_at)
      VALUES ('INBOX', $1, $2, 'Prof. Kavita Sharma', 'kavita.sharma@university.test', ARRAY['support@altvivo.test'], 'RE: Site licence for 180 students',
-             E'Thank you, received. Could the proforma mention our GSTIN 27AAAAA0000A1Z5? We will also take up the free month for the faculty.', 'inbound', true, now() - interval '3 hours', now())`,
-    [m1.thread_id, m2.id],
+             E'Thank you, received. Could the proforma mention our GSTIN 27AAAAA0000A1Z5? We will also take up the free month for the faculty.', 'inbound', true, $3::jsonb, now() - interval '3 hours', now())`,
+    [m1.thread_id, m2.id, JSON.stringify([{ key: DEV_ATTACHMENT_KEY, fileName: "GST certificate.pdf", contentType: "application/pdf", size: 18432 }])],
   );
   const { rows: [support] } = await db.query(
     `INSERT INTO contact_messages (name, email, category, subject, message, app_id, created_at, updated_at)

@@ -992,6 +992,8 @@ model MailMessage {
   createdBy        String?     @map("created_by") @db.Uuid
   sentAt           DateTime?   @map("sent_at") @db.Timestamptz(6)
   deliveryError    String?     @map("delivery_error") @db.VarChar(500)
+  /// [{ key, fileName, contentType, size }] in the vault bucket (received mail only).
+  attachments      Json        @default("[]")
   createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 

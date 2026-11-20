@@ -284,6 +284,39 @@ describe('SuperAdmin mailbox', () => {
     expect(reply).toMatchObject({ folder: 'INBOX', threadId: sent.threadId, inReplyTo: sent.id, source: 'inbound' });
   });
 
+  it('keeps attachments the worker stored, serves them to admins and deletes them with the message', async () => {
+    const key = 'mail-inbound/0b6c9f3e-1d2a-4c5b-9e8f-7a6b5c4d3e2f/photo.jpg';
+    ctx.storage.objects.set(key, Buffer.alloc(2048, 1));
+    const post = (attachments: unknown[]) =>
+      ctx.app.inject({
+        method: 'POST', url: '/v1/webhooks/mail/inbound', headers: { authorization: `Bearer ${INBOUND_TOKEN}` },
+        payload: { from: 'prof@uni.edu', subject: 'Advisory board acceptance', text: 'I accept. Photo attached.', attachments },
+      });
+
+    // Keys outside mail-inbound/<uuid>/ are refused outright.
+    expect((await post([{ key: 'invoices/2026/x.pdf', fileName: 'x.pdf', size: 1 }])).statusCode).toBe(400);
+
+    const r = await post([
+      { key, fileName: 'Prof Photo.jpg', contentType: 'image/jpeg', size: 1 },
+      { key: 'mail-inbound/0b6c9f3e-1d2a-4c5b-9e8f-7a6b5c4d3e2f/missing.pdf', fileName: 'missing.pdf', size: 10 },
+    ]);
+    expect(r.statusCode).toBe(201);
+    const id = json(r).id;
+    const m = await ctx.deps.prisma.mailMessage.findUniqueOrThrow({ where: { id } });
+    // The missing file is dropped and the stored size wins.
+    expect(m.attachments).toEqual([{ key, fileName: 'Prof Photo.jpg', contentType: 'image/jpeg', size: 2048 }]);
+
+    const dl = await admin.b.request('GET', `/v1/api/admin/mail/${id}/attachments/0`);
+    expect(dl.statusCode).toBe(200);
+    expect(json(dl)).toMatchObject({ url: `https://r2.test/altvivo-vault/${key}?get=1`, fileName: 'Prof Photo.jpg' });
+    expect((await admin.b.request('GET', `/v1/api/admin/mail/${id}/attachments/1`)).statusCode).toBe(404);
+    expect((await ctx.app.inject({ method: 'GET', url: `/v1/api/admin/mail/${id}/attachments/0` })).statusCode).toBe(401);
+
+    await admin.b.request('PATCH', `/v1/api/admin/mail/${id}`, { folder: 'TRASH' });
+    expect((await admin.b.request('DELETE', `/v1/api/admin/mail/${id}`)).statusCode).toBe(204);
+    expect(ctx.storage.removed).toContain(key);
+  });
+
   it('requires a recipient, subject and text to send', async () => {
     expect((await admin.b.request('POST', '/v1/api/admin/mail', { subject: 'Hello', body: 'Hi' })).statusCode).toBe(400);
     expect((await admin.b.request('POST', '/v1/api/admin/mail', { to: ['a@b.edu'], body: 'Hi' })).statusCode).toBe(400);

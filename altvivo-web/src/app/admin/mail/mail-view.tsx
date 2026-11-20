@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, Bold, CornerUpLeft, FileEdit, Forward, Heading, Inbox, Italic, Link2, List, ListOrdered, MailOpen, Mail as MailIcon, PenSquare, Quote, RefreshCw, RotateCcw, Search, Send, Star, Strikethrough, Trash2, Underline } from "lucide-react";
+import { ArrowLeft, Bold, Download, Paperclip, CornerUpLeft, FileEdit, Forward, Heading, Inbox, Italic, Link2, List, ListOrdered, MailOpen, Mail as MailIcon, PenSquare, Quote, RefreshCw, RotateCcw, Search, Send, Star, Strikethrough, Trash2, Underline } from "lucide-react";
 import { LoadState, PageHeader, adminError, useAdmin } from "@/components/admin/kit";
 import { Dialog } from "@/components/client";
 import { Alert, Button, Card, Field, Pill, cx, formatDate } from "@/components/ui";
@@ -41,7 +41,14 @@ interface MailBase {
   trialRequestId: string | null;
   sentAt: string | null;
   deliveryError: string | null;
+  attachments?: MailAttachment[];
   createdAt: string;
+}
+interface MailAttachment {
+  key: string;
+  fileName: string;
+  contentType: string;
+  size: number;
 }
 interface MailRow extends MailBase {
   snippet: string;
@@ -459,7 +466,10 @@ export function MailView() {
                             </span>
                             <span className="readout shrink-0 text-[11px] text-subtle">{when(m.sentAt ?? m.createdAt)}</span>
                           </span>
-                          <span className={cx("mt-0.5 block truncate text-sm", unread ? "font-semibold text-fg" : "text-fg")}>{m.subject}</span>
+                          <span className={cx("mt-0.5 flex items-center gap-1.5 text-sm", unread ? "font-semibold text-fg" : "text-fg")}>
+                            <span className="truncate">{m.subject}</span>
+                            {!!m.attachments?.length && <Paperclip className="size-3.5 shrink-0 text-subtle" aria-label={`${m.attachments.length} attachment${m.attachments.length > 1 ? "s" : ""}`} />}
+                          </span>
                           <span className="mt-0.5 block truncate text-xs text-subtle">{m.snippet || "(no text)"}</span>
                           {(SOURCE[m.source] || m.deliveryError) && (
                             <span className="mt-1.5 flex flex-wrap gap-1.5">
@@ -587,6 +597,7 @@ export function MailView() {
                                 )}
                                 {/* Escaped first, then a fixed set of tags (see format.ts): safe to inject. */}
                                 <div className="mt-3 break-words text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: renderMailHtml(m.body, WEB_STYLE) }} />
+                                {!!m.attachments?.length && <Attachments messageId={m.id} files={m.attachments} />}
                               </li>
                             );
                           })}
@@ -623,6 +634,52 @@ export function MailView() {
         />
       )}
     </>
+  );
+}
+
+const fileSize = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+
+/** Files received with a message: each download asks core for a short-lived private link. */
+function Attachments({ messageId, files }: { messageId: string; files: MailAttachment[] }) {
+  const [busy, setBusy] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  async function download(n: number) {
+    setBusy(n);
+    setError(null);
+    try {
+      const r = await api<{ url: string }>(`/v1/api/admin/mail/${messageId}/attachments/${n}`);
+      window.location.assign(r.url);
+    } catch (err) {
+      setError(adminError(err, "The file could not be downloaded."));
+    } finally {
+      setBusy(null);
+    }
+  }
+  return (
+    <div className="mt-4 border-t border-line pt-3">
+      <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-subtle">
+        <Paperclip className="size-3.5" aria-hidden /> {files.length} attachment{files.length > 1 ? "s" : ""}
+      </p>
+      <ul className="flex flex-wrap gap-2">
+        {files.map((f, n) => (
+          <li key={f.key}>
+            <button
+              type="button"
+              onClick={() => download(n)}
+              disabled={busy !== null}
+              className="flex max-w-64 items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 py-2 text-left text-xs hover:border-accent disabled:opacity-60"
+            >
+              <Download className={cx("size-4 shrink-0 text-accent-ink", busy === n && "animate-pulse")} aria-hidden />
+              <span className="min-w-0">
+                <span className="block truncate font-medium text-fg">{f.fileName}</span>
+                <span className="block text-subtle">{fileSize(f.size)}</span>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {error && <p className="mt-2 text-xs text-danger">{error}</p>}
+    </div>
   );
 }
 

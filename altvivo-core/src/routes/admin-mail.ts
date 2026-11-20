@@ -51,12 +51,29 @@ const ListQuery = z.object({
   cursor: z.string().uuid().optional(),
 });
 
+/** Object keys the email worker may write: mail-inbound/<uuid>/<safe name>. */
+const ATTACHMENT_KEY = /^mail-inbound\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/[A-Za-z0-9._-]{1,120}$/;
+const AttachmentIn = z.object({
+  key: z.string().regex(ATTACHMENT_KEY),
+  fileName: z.string().trim().min(1).max(200),
+  contentType: z.string().trim().max(120).default('application/octet-stream'),
+  size: z.number().int().min(0).max(30 * 1024 * 1024),
+});
+export interface MailAttachment {
+  key: string;
+  fileName: string;
+  contentType: string;
+  size: number;
+}
+export const attachmentsOf = (m: { attachments: Prisma.JsonValue }): MailAttachment[] => (Array.isArray(m.attachments) ? (m.attachments as unknown as MailAttachment[]) : []);
+
 const InboundBody = z.object({
   from: email,
   fromName: z.string().trim().max(200).optional(),
   to: z.array(email).max(20).default([]),
   subject: z.string().trim().max(300).default('(no subject)'),
   text: z.string().trim().min(1).max(20000),
+  attachments: z.array(AttachmentIn).max(20).default([]),
 });
 
 const ApproveBody = z.object({ totpCode, days: z.number().int().min(1).max(90).optional(), note: z.string().trim().max(500).optional() });
@@ -121,6 +138,20 @@ export default async function adminMailRoutes(app: FastifyInstance, d: Deps) {
       take: 100,
     });
     return { message, thread, counts: await mailCounts(d.prisma) };
+  });
+
+  /** Short-lived download link for one attachment (vault bucket, never public). */
+  app.get('/v1/api/admin/mail/:id/attachments/:n', opts, async (req) => {
+    const { id, n } = parse(z.object({ id: z.string().uuid(), n: z.coerce.number().int().min(0).max(19) }), req.params);
+    const message = await d.prisma.mailMessage.findUnique({ where: { id }, select: { attachments: true } });
+    const file = message ? attachmentsOf(message)[n] : undefined;
+    if (!file) throw notFound();
+    // Content-Disposition must be ASCII; keep the extension readable.
+    const downloadName = file.fileName.normalize('NFKD').replace(/[^\x20-\x7e]/g, '_');
+    const ttl = d.cfg.R2_PRESIGN_TTL_SECONDS;
+    const url = await d.storage.presignGet(d.cfg.R2_BUCKET_VAULT, file.key, ttl, downloadName);
+    await withAudit(d.prisma, actorOf(req), (tx) => audit(tx, 'ADMIN.MAIL_ATTACHMENT_DOWNLOADED', id, { index: n, file_name: file.fileName })).catch(() => undefined);
+    return { url, fileName: file.fileName, expiresInSeconds: ttl };
   });
 
   /** Compose: send now, or save / update a draft. Replies join the conversation of `inReplyTo`. */
@@ -226,24 +257,34 @@ export default async function adminMailRoutes(app: FastifyInstance, d: Deps) {
     return { changed, counts: await mailCounts(d.prisma) };
   });
 
+  /** Best effort: a file left behind is harmless (private bucket, no reference). */
+  const removeFiles = async (rows: { attachments: Prisma.JsonValue }[]) => {
+    for (const f of rows.flatMap(attachmentsOf)) {
+      await d.storage.remove(d.cfg.R2_BUCKET_VAULT, f.key).catch((err) => app.log.warn({ err, key: f.key }, 'attachment cleanup failed'));
+    }
+  };
+
   app.post('/v1/api/admin/mail/trash/empty', opts, async (req) => {
+    const files = await d.prisma.mailMessage.findMany({ where: { folder: 'TRASH' }, select: { attachments: true } });
     const deleted = await withAudit(d.prisma, actorOf(req), async (tx) => {
       const res = await tx.mailMessage.deleteMany({ where: { folder: 'TRASH' } });
       if (res.count) await audit(tx, 'ADMIN.MAIL_DELETED', null, { count: res.count, emptied_trash: true });
       return res.count;
     });
+    await removeFiles(files);
     return { deleted, counts: await mailCounts(d.prisma) };
   });
 
   app.delete('/v1/api/admin/mail/:id', opts, async (req, reply) => {
     const { id } = parse(UuidParam, req.params);
-    const row = await d.prisma.mailMessage.findUnique({ where: { id }, select: { folder: true } });
+    const row = await d.prisma.mailMessage.findUnique({ where: { id }, select: { folder: true, attachments: true } });
     if (!row) throw notFound();
     if (row.folder !== 'TRASH' && row.folder !== 'DRAFT') throw conflict('NOT_IN_TRASH', 'Move the message to Trash first');
     await withAudit(d.prisma, actorOf(req), async (tx) => {
       await tx.mailMessage.delete({ where: { id } });
       await audit(tx, 'ADMIN.MAIL_DELETED', id, { count: 1 });
     });
+    await removeFiles([row]);
     return reply.code(204).send();
   });
 
@@ -257,10 +298,17 @@ export default async function adminMailRoutes(app: FastifyInstance, d: Deps) {
     const given = req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7).trim() : '';
     if (!expected || !given || !safeEqual(expected, given)) throw unauthorized('WEBHOOK_AUTH_INVALID', 'Invalid token');
     const body = parse(InboundBody, req.body);
+    // Keep only files the worker really stored; the stored size is authoritative.
+    const attachments: MailAttachment[] = [];
+    for (const a of body.attachments) {
+      const head = await d.storage.head(d.cfg.R2_BUCKET_VAULT, a.key).catch(() => null);
+      if (head) attachments.push({ key: a.key, fileName: a.fileName, contentType: a.contentType, size: head.size });
+      else req.log.warn({ key: a.key }, 'inbound attachment missing from storage');
+    }
     const thread = await threadForInbound(d.prisma, body.from, body.subject);
     const message = await withAudit(d.prisma, systemActor(), async (tx) => {
-      const m = await deliverToInbox(tx, { fromName: body.fromName ?? null, fromEmail: body.from, toEmails: body.to, subject: body.subject, body: body.text, source: 'inbound', ...(thread ?? {}) });
-      await audit(tx, 'MAIL.INBOUND', m.id, { threaded: !!thread });
+      const m = await deliverToInbox(tx, { fromName: body.fromName ?? null, fromEmail: body.from, toEmails: body.to, subject: body.subject, body: body.text, source: 'inbound', attachments, ...(thread ?? {}) });
+      await audit(tx, 'MAIL.INBOUND', m.id, { threaded: !!thread, attachments: attachments.length });
       return m;
     });
     return reply.code(201).send({ status: 'received', id: message.id });

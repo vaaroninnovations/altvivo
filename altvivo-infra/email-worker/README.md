@@ -5,6 +5,11 @@
 | `no-reply@altvivo.bio` (`SMTP_FROM`) | **One-way, send only.** Mail sent to it is rejected with a bounce that points to hello@. | Verification, password reset, receipts, invoices, trial notices, security alerts. Carries `Auto-Submitted: auto-generated`, and the footer says replies are not accepted. |
 | `hello@altvivo.bio` (`SMTP_REPLY_FROM`) | **Two-way.** People can reply. | Messages written in **Admin → Mailbox** and account invites from **Admin → Users → Add user**. Replies show up in the Mailbox inbox, in the same conversation. |
 
+**Attachments** on received mail (up to 20 files, 25 MB each) are stored in the
+private `altvivo-vault` R2 bucket under `mail-inbound/`. The worker skips the small
+inline images that mail signatures add. Admins download them from the message in
+the Mailbox through 5-minute links, and deleting the message deletes its files.
+
 Both addresses send through Resend (`smtp.resend.com`). Because the whole
 `altvivo.bio` domain is verified there, hello@ can send without any extra setup.
 

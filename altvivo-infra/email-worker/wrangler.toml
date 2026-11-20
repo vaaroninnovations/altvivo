@@ -10,4 +10,10 @@ INBOUND_URL = "https://api.altvivo.bio/v1/webhooks/mail/inbound"
 # destination address in Email Routing). Leave empty to keep it in the Mailbox only.
 FORWARD_TO = ""
 
+# Attachments of received mail are stored here, under mail-inbound/<uuid>/<name>.
+# Private bucket: core hands out short-lived download links to SuperAdmins only.
+[[r2_buckets]]
+binding = "MAIL_FILES"
+bucket_name = "altvivo-vault"
+
 # Secret (not in this file): wrangler secret put MAIL_INBOUND_TOKEN

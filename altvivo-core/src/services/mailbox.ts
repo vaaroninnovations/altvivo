@@ -14,6 +14,8 @@ export interface InboxInput {
   trialRequestId?: string | null;
   threadId?: string | null;
   inReplyTo?: string | null;
+  /** Files already stored in the vault bucket. */
+  attachments?: { key: string; fileName: string; contentType: string; size: number }[];
 }
 
 /** Files a message in the SuperAdmin inbox (unread). */
@@ -31,6 +33,7 @@ export function deliverToInbox(db: Db, m: InboxInput): Promise<MailMessage> {
       source: m.source,
       contactMessageId: m.contactMessageId ?? null,
       trialRequestId: m.trialRequestId ?? null,
+      attachments: m.attachments ?? [],
     },
   });
 }
