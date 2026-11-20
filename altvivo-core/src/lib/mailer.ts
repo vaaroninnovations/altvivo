@@ -1,5 +1,6 @@
 import nodemailer, { type Transporter } from 'nodemailer';
 import type { Config } from '../config.js';
+import { mailPlainText, renderMailHtml } from './mail-format.js';
 
 export interface MailMessage {
   to: string;
@@ -207,8 +208,8 @@ export const templates = {
   adminMessage(subject: string, body: string): Omit<MailMessage, 'to'> {
     return {
       subject,
-      text: body,
-      html: layout(subject, `<div style="white-space:pre-wrap">${escapeHtml(body)}</div>`, 'This message was sent to you by the AltVivo team. You can reply to this email.', true),
+      text: mailPlainText(body),
+      html: layout(subject, renderMailHtml(body),'This message was sent to you by the AltVivo team. You can reply to this email.', true),
     };
   },
 };

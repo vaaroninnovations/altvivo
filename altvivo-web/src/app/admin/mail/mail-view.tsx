@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft, CornerUpLeft, FileEdit, Forward, Inbox, MailOpen, Mail as MailIcon, PenSquare, RefreshCw, RotateCcw, Search, Send, Star, Trash2 } from "lucide-react";
+import { ArrowLeft, Bold, CornerUpLeft, FileEdit, Forward, Heading, Inbox, Italic, Link2, List, ListOrdered, MailOpen, Mail as MailIcon, PenSquare, Quote, RefreshCw, RotateCcw, Search, Send, Star, Strikethrough, Trash2, Underline } from "lucide-react";
 import { LoadState, PageHeader, adminError, useAdmin } from "@/components/admin/kit";
 import { Dialog } from "@/components/client";
 import { Alert, Button, Card, Field, Pill, cx, formatDate } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { MAIL_TEMPLATES } from "./templates";
+import { WEB_STYLE, renderMailHtml } from "./format";
 
 type Folder = "INBOX" | "SENT" | "DRAFT" | "TRASH";
 type View = Folder | "STARRED";
@@ -584,7 +585,8 @@ export function MailView() {
                                     {m.ccEmails.length > 0 && ` · Cc ${m.ccEmails.join(", ")}`}
                                   </p>
                                 )}
-                                <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-relaxed">{m.body}</p>
+                                {/* Escaped first, then a fixed set of tags (see format.ts): safe to inject. */}
+                                <div className="mt-3 break-words text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: renderMailHtml(m.body, WEB_STYLE) }} />
                               </li>
                             );
                           })}
@@ -624,6 +626,55 @@ export function MailView() {
   );
 }
 
+type Action = { wrap: [string, string]; placeholder: string } | { prefix: string } | { link: true };
+
+const TOOLS: ({ label: string; Icon: typeof Bold; action: Action; keys?: string } | "|")[] = [
+  { label: "Bold", Icon: Bold, action: { wrap: ["**", "**"], placeholder: "bold text" }, keys: "b" },
+  { label: "Italic", Icon: Italic, action: { wrap: ["*", "*"], placeholder: "italic text" }, keys: "i" },
+  { label: "Underline", Icon: Underline, action: { wrap: ["__", "__"], placeholder: "underlined text" }, keys: "u" },
+  { label: "Strikethrough", Icon: Strikethrough, action: { wrap: ["~~", "~~"], placeholder: "struck text" } },
+  "|",
+  { label: "Heading", Icon: Heading, action: { prefix: "## " } },
+  { label: "Bulleted list", Icon: List, action: { prefix: "- " } },
+  { label: "Numbered list", Icon: ListOrdered, action: { prefix: "1. " } },
+  { label: "Quote", Icon: Quote, action: { prefix: "> " } },
+  "|",
+  { label: "Link", Icon: Link2, action: { link: true }, keys: "k" },
+];
+
+const LINE_MARK = /^(\d{1,3}[.)]|[-*•>]|#{1,2})\s+/;
+
+/** Pure text edit behind the toolbar: returns the new text and the range to select. */
+function applyFormat(text: string, start: number, end: number, action: Action): { text: string; start: number; end: number } | null {
+  if ("wrap" in action) {
+    const [a, b] = action.wrap;
+    const sel = text.slice(start, end);
+    // Toggle off when the selection is already wrapped.
+    if (sel && text.slice(start - a.length, start) === a && text.slice(end, end + b.length) === b) {
+      return { text: text.slice(0, start - a.length) + sel + text.slice(end + b.length), start: start - a.length, end: end - a.length };
+    }
+    const inner = sel || action.placeholder;
+    return { text: text.slice(0, start) + a + inner + b + text.slice(end), start: start + a.length, end: start + a.length + inner.length };
+  }
+  if ("link" in action) {
+    const url = window.prompt("Link address (https://…)", "https://")?.trim();
+    if (!url || !/^(https?:\/\/|mailto:)\S+$/.test(url)) return null;
+    const label = text.slice(start, end) || url;
+    const md = `[${label}](${url})`;
+    return { text: text.slice(0, start) + md + text.slice(end), start: start + 1, end: start + 1 + label.length };
+  }
+  // Line marks apply to every line the selection touches; pressing again removes them.
+  const from = text.lastIndexOf("\n", start - 1) + 1;
+  const stop = text.indexOf("\n", end);
+  const to = stop === -1 ? text.length : stop;
+  const lines = text.slice(from, to).split("\n");
+  const numbered = action.prefix === "1. ";
+  const has = (l: string) => (numbered ? /^\d{1,3}[.)]\s+/.test(l) : l.startsWith(action.prefix));
+  const off = lines.every(has);
+  const next = lines.map((l, n) => (off ? l.replace(LINE_MARK, "") : `${numbered ? `${n + 1}. ` : action.prefix}${l.replace(LINE_MARK, "")}`)).join("\n");
+  return { text: text.slice(0, from) + next + text.slice(to), start: from, end: from + next.length };
+}
+
 function Composer({ initial, sender, onClose, onDone }: { initial: Draft; sender: string; onClose: () => void; onDone: (notice: string) => Promise<void> }) {
   const [form, setForm] = useState(initial);
   const [showCc, setShowCc] = useState(!!initial.cc);
@@ -632,6 +683,20 @@ function Composer({ initial, sender, onClose, onDone }: { initial: Draft; sender
   const set = (k: "to" | "cc" | "subject" | "body") => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const toRef = useRef<HTMLInputElement>(null);
+  const [tab, setTab] = useState<"write" | "preview">("write");
+
+  /** Applies a toolbar action to the textarea selection and keeps the cursor sensible. */
+  function format(action: Action) {
+    const el = bodyRef.current;
+    if (!el) return;
+    const r = applyFormat(el.value, el.selectionStart, el.selectionEnd, action);
+    if (!r) return;
+    setForm((f) => ({ ...f, body: r.text }));
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(r.start, r.end);
+    });
+  }
   // Start typing where it makes sense: the recipient for a new message, above the quoted text for a reply.
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -688,7 +753,7 @@ function Composer({ initial, sender, onClose, onDone }: { initial: Draft; sender
         {error && <Alert tone="danger">{error}</Alert>}
         {sender && (
           <p className="text-xs text-subtle">
-            From <span className="readout text-muted">{sender}</span>. Replies go to the support address.
+            From <span className="readout text-muted">{sender}</span>. Replies come back to this Mailbox.
           </p>
         )}
         <Field label="To" id="mail-to" hint="Separate several addresses with commas.">
@@ -730,9 +795,75 @@ function Composer({ initial, sender, onClose, onDone }: { initial: Draft; sender
         <Field label="Subject" id="mail-subject">
           <input id="mail-subject" className="field" value={form.subject} onChange={set("subject")} maxLength={300} />
         </Field>
-        <Field label="Message" id="mail-body">
-          <textarea id="mail-body" ref={bodyRef} rows={12} className="field" value={form.body} onChange={set("body")} maxLength={20000} />
-        </Field>
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <label htmlFor="mail-body" className="block text-sm font-medium text-fg">
+              Message
+            </label>
+            <div className="flex rounded-lg border border-line p-0.5 text-xs" role="tablist" aria-label="Message view">
+              {(["write", "preview"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === t}
+                  onClick={() => setTab(t)}
+                  className={cx("rounded-md px-2.5 py-1 font-medium capitalize", tab === t ? "bg-surface-3 text-fg" : "text-subtle hover:text-fg")}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          </div>
+          {tab === "write" ? (
+            <>
+              <div className="flex flex-wrap gap-0.5 rounded-t-[10px] border border-b-0 border-line-strong bg-surface-2 p-1" role="toolbar" aria-label="Formatting">
+                {TOOLS.map((t, n) =>
+                  t === "|" ? (
+                    <span key={`sep-${n}`} className="mx-1 my-1 w-px bg-line" aria-hidden />
+                  ) : (
+                    <button
+                      key={t.label}
+                      type="button"
+                      title={t.keys ? `${t.label} (Ctrl+${t.keys.toUpperCase()})` : t.label}
+                      aria-label={t.label}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => format(t.action)}
+                      className="flex size-8 items-center justify-center rounded-md text-muted hover:bg-surface-3 hover:text-fg"
+                    >
+                      <t.Icon className="size-4" aria-hidden />
+                    </button>
+                  ),
+                )}
+              </div>
+              <textarea
+                id="mail-body"
+                ref={bodyRef}
+                rows={12}
+                className="field !mt-0 rounded-t-none"
+                value={form.body}
+                onChange={set("body")}
+                onKeyDown={(e) => {
+                  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+                  const t = TOOLS.find((x) => x !== "|" && x.keys === e.key.toLowerCase());
+                  if (t && t !== "|") {
+                    e.preventDefault();
+                    format(t.action);
+                  }
+                }}
+                maxLength={20000}
+              />
+              <p className="text-xs text-subtle">
+                Select text and use the buttons, or type <span className="readout">**bold**</span>, <span className="readout">*italic*</span>, <span className="readout">- list</span>. Web addresses become links.
+              </p>
+            </>
+          ) : (
+            <div
+              className="min-h-[18rem] rounded-[10px] border border-line-strong bg-surface px-4 py-3 text-sm leading-relaxed"
+              dangerouslySetInnerHTML={{ __html: form.body.trim() ? renderMailHtml(form.body, WEB_STYLE) : '<p style="color:var(--subtle)">Nothing to preview yet.</p>' }}
+            />
+          )}
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Button type="button" variant="ghost" onClick={() => submit(true)} loading={busy === "draft"} disabled={busy === "send"}>
             <FileEdit className="size-4" aria-hidden /> Save draft
