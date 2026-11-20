@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Divider, OAuthButtons, go } from "@/components/auth";
-import { Turnstile, useResetCounter } from "@/components/client";
+import { Turnstile, useResetCounter, PasswordInput } from "@/components/client";
 import { Alert, Button, Field } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 
@@ -72,7 +72,7 @@ export function LoginForm({ next, oauthError, notice }: { next: string; oauthErr
               </Link>
             }
           >
-            <input id="password" type="password" autoComplete="current-password" required className="field" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <PasswordInput id="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
           </Field>
           <Turnstile action="login" onToken={setToken} resetKey={resetKey} />
           <Button type="submit" size="lg" className="w-full" loading={busy} disabled={!email || !password}>

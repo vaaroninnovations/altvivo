@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { Divider, OAuthButtons, go } from "@/components/auth";
-import { Turnstile, useResetCounter } from "@/components/client";
+import { Turnstile, useResetCounter, PasswordInput } from "@/components/client";
 import { Alert, Button, Field, cx } from "@/components/ui";
 import { PUBLIC } from "@/lib/config";
 import { api, ApiError, fieldErrors } from "@/lib/api";
@@ -137,10 +137,8 @@ export function RegisterForm({ next, oauthPendingId, defaultEmail = "", freeMont
             </Field>
           </div>
           <Field label={passwordRequired ? "Password" : "Password (optional)"} id="password" error={fields.password}>
-            <input
+            <PasswordInput
               id="password"
-              type="password"
-              className="field"
               autoComplete="new-password"
               required={passwordRequired}
               minLength={12}

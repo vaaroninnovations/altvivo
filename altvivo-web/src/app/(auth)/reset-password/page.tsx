@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Alert, Button, Field } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
+import { PasswordInput } from "@/components/client";
 
 function ResetForm() {
   const router = useRouter();
@@ -40,10 +41,10 @@ function ResetForm() {
     <form onSubmit={submit} className="mt-8 space-y-5" noValidate>
       {error && <Alert tone="danger">{error}</Alert>}
       <Field label="New password" id="password" hint="At least 12 characters. Signing in with the new password signs you out everywhere else.">
-        <input id="password" type="password" className="field" autoComplete="new-password" minLength={12} required value={password} onChange={(e) => setPassword(e.target.value)} />
+        <PasswordInput id="password" autoComplete="new-password" minLength={12} required value={password} onChange={(e) => setPassword(e.target.value)} />
       </Field>
       <Field label="Repeat new password" id="confirm">
-        <input id="confirm" type="password" className="field" autoComplete="new-password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        <PasswordInput id="confirm" autoComplete="new-password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} />
       </Field>
       <Button type="submit" size="lg" className="w-full" loading={busy} disabled={password.length < 12 || !confirm}>
         Set new password

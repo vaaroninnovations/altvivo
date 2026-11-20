@@ -6,6 +6,7 @@ import { Copy, Download, KeyRound, Laptop, ShieldCheck, ShieldOff, UserRound } f
 import { go } from "@/components/auth";
 import { Alert, Button, Card, Field, Pill, formatDate } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
+import { PasswordInput } from "@/components/client";
 
 export interface AccountData {
   email: string;
@@ -104,11 +105,11 @@ function PasswordForm({ hasPassword }: { hasPassword: boolean }) {
       <div className="grid gap-4 sm:grid-cols-2">
         {hasPassword && (
           <Field label="Current password" id="current">
-            <input id="current" type="password" autoComplete="current-password" className="field" value={current} onChange={(e) => setCurrent(e.target.value)} required />
+            <PasswordInput id="current" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
           </Field>
         )}
         <Field label="New password" id="new" hint="At least 12 characters.">
-          <input id="new" type="password" autoComplete="new-password" className="field" value={next} onChange={(e) => setNext(e.target.value)} required minLength={12} />
+          <PasswordInput id="new" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} required minLength={12} />
         </Field>
       </div>
       <Button type="submit" loading={state.busy} disabled={next.length < 12 || (hasPassword && !current)}>
@@ -310,7 +311,7 @@ function MfaSection({ enabled, roleRequires, pending }: { enabled: boolean; role
                 <ShieldOff className="size-4" aria-hidden /> Turn off two-factor
               </p>
               <Field label="Password" id="mfa-pw">
-                <input id="mfa-pw" type="password" className="field" autoComplete="current-password" value={disablePw} onChange={(e) => setDisablePw(e.target.value)} required />
+                <PasswordInput id="mfa-pw" autoComplete="current-password" value={disablePw} onChange={(e) => setDisablePw(e.target.value)} required />
               </Field>
               <Field label="Current code" id="totp-off">
                 <input id="totp-off" className="field readout max-w-48" inputMode="numeric" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} />

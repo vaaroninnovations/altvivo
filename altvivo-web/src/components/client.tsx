@@ -1,9 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { Moon, Sun, X } from "lucide-react";
+import { useCallback, useEffect, useId, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { Eye, EyeOff, Moon, Sun, X } from "lucide-react";
 import { PUBLIC } from "@/lib/config";
 import { cx } from "./ui";
+
+// --------------------------------------------------------------- password --
+/** Password field with a show / hide toggle. Takes the same props as <input>. */
+export function PasswordInput({ className, ...props }: Omit<ComponentProps<"input">, "type">) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="relative">
+      <input {...props} type={visible ? "text" : "password"} className={cx("field pr-11", className)} autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+      <button
+        type="button"
+        onClick={() => setVisible((v) => !v)}
+        className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-[10px] text-subtle hover:text-fg focus-visible:text-fg focus-visible:outline-none"
+        aria-label={visible ? "Hide password" : "Show password"}
+        aria-pressed={visible}
+        aria-controls={props.id}
+      >
+        {visible ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
+      </button>
+    </div>
+  );
+}
 
 // ------------------------------------------------------------------ theme --
 type ThemePref = "light" | "dark" | "system";
