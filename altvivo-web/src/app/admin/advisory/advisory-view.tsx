@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { ArrowDown, ArrowUp, ExternalLink, ImageUp, Pencil, Plus, Star, Trash2 } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { ArrowDown, ArrowUp, Award, Download, ExternalLink, ImageUp, Pencil, Plus, Star, Trash2 } from "lucide-react";
 import { LoadState, PageHeader, adminError, useAdmin } from "@/components/admin/kit";
 import { Dialog, Switch } from "@/components/client";
 import { Alert, Button, ButtonLink, Card, Field, Pill } from "@/components/ui";
 import { api } from "@/lib/api";
 import type { AdvisoryMember } from "@/lib/types";
+import { CARD_SIZES, cardBlob, renderWelcomeCard, type CardFormat } from "./welcome-card";
 
 type Member = AdvisoryMember & { id: string; sortOrder: number; isPublished: boolean; featured: boolean; userId: string | null; updatedAt: string };
 
@@ -89,15 +90,43 @@ async function sha256Hex(file: File) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const PHOTO_MAX_BYTES = 2 * 1024 * 1024;
+const NO_BUCKET = "Photo uploads are not set up on this server yet (no public media bucket). Paste an https photo URL instead.";
+
+/** Browser-side pre-check; core re-checks type and size and sniffs the uploaded bytes. */
+const photoProblem = (f: File) =>
+  !PHOTO_TYPES.includes(f.type) ? "Use a JPEG, PNG or WebP image." : f.size > PHOTO_MAX_BYTES ? "The image must be 2 MB or smaller." : null;
+
+/** Signed upload straight to the public bucket, then core verifies it and sets the member's photo. */
+async function uploadPortrait(memberId: string, file: File, photoAlt: string, onStep: (s: string) => void) {
+  onStep("Checksumming…");
+  const sha256 = await sha256Hex(file);
+  onStep("Requesting upload…");
+  const signed = await api<{ objectKey: string; uploadUrl: string; method: string; headers: Record<string, string> }>(`/v1/api/admin/advisory-board/${memberId}/photo-upload`, {
+    method: "POST",
+    body: { contentType: file.type, sizeBytes: file.size, sha256 },
+  });
+  onStep("Uploading photo…");
+  const put = await fetch(signed.uploadUrl, { method: signed.method, headers: { "Content-Type": file.type, ...signed.headers }, body: file });
+  if (!put.ok) throw new Error(`Photo upload failed (${put.status}).`);
+  onStep("Verifying photo…");
+  await api(`/v1/api/admin/advisory-board/${memberId}/photo-complete`, { method: "POST", body: { objectKey: signed.objectKey, photoAlt } });
+}
+
+const uploadError = (err: unknown) => (err instanceof Error && !("code" in err) ? err.message : adminError(err));
+
 export function AdvisoryView() {
-  const { data, error, loading, reload, setData } = useAdmin<{ members: Member[] }>("/v1/api/admin/advisory-board");
+  const { data, error, loading, reload, setData } = useAdmin<{ members: Member[]; photoUploads?: boolean }>("/v1/api/admin/advisory-board");
   const [editing, setEditing] = useState<Member | "new" | null>(null);
   const [photoFor, setPhotoFor] = useState<Member | null>(null);
+  const [cardFor, setCardFor] = useState<Member | null>(null);
   const [removing, setRemoving] = useState<Member | null>(null);
   const [notice, setNotice] = useState<{ tone: "success" | "danger"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const members = data?.members ?? [];
+  const photoUploads = data?.photoUploads ?? false;
   const ok = (text: string) => {
     setNotice({ tone: "success", text });
     void reload();
@@ -118,7 +147,7 @@ export function AdvisoryView() {
     const target = index + dir;
     if (target < 0 || target >= next.length) return;
     [next[index], next[target]] = [next[target]!, next[index]!];
-    setData({ members: next });
+    setData({ members: next, photoUploads });
     try {
       await api("/v1/api/admin/advisory-board/reorder", { method: "POST", body: { ids: next.map((m) => m.id) } });
       void reload();
@@ -217,6 +246,9 @@ export function AdvisoryView() {
                 <Button size="sm" variant="ghost" onClick={() => setPhotoFor(m)}>
                   <ImageUp className="size-3.5" aria-hidden /> Photo
                 </Button>
+                <Button size="sm" variant="ghost" onClick={() => setCardFor(m)}>
+                  <Award className="size-3.5" aria-hidden /> Welcome card
+                </Button>
                 <Button size="sm" variant="outline" onClick={() => setEditing(m)}>
                   <Pencil className="size-3.5" aria-hidden /> Edit
                 </Button>
@@ -232,6 +264,7 @@ export function AdvisoryView() {
       {editing && (
         <MemberDialog
           member={editing === "new" ? null : editing}
+          photoUploads={photoUploads}
           onClose={() => setEditing(null)}
           onSaved={(msg) => {
             setEditing(null);
@@ -242,6 +275,7 @@ export function AdvisoryView() {
       {photoFor && (
         <PhotoDialog
           member={photoFor}
+          photoUploads={photoUploads}
           onClose={() => setPhotoFor(null)}
           onSaved={() => {
             setPhotoFor(null);
@@ -249,6 +283,7 @@ export function AdvisoryView() {
           }}
         />
       )}
+      {cardFor && <WelcomeCardDialog member={cardFor} onClose={() => setCardFor(null)} />}
       <Dialog open={!!removing} onClose={() => !busy && setRemoving(null)} title={`Delete ${removing?.fullName ?? ""}?`}>
         <p className="text-sm text-muted">The profile is removed from the site and the CMS. To take it offline but keep it, switch off Published instead.</p>
         <div className="mt-5 flex justify-end gap-2">
@@ -264,27 +299,63 @@ export function AdvisoryView() {
   );
 }
 
-function MemberDialog({ member, onClose, onSaved }: { member: Member | null; onClose: () => void; onSaved: (msg: string) => void }) {
+function MemberDialog({ member, photoUploads, onClose, onSaved }: { member: Member | null; photoUploads: boolean; onClose: () => void; onSaved: (msg: string) => void }) {
   const [f, setF] = useState<Form>(member ? toForm(member) : EMPTY);
   const [slugTouched, setSlugTouched] = useState(!!member);
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  // Set once a new member is created, so a retry after a failed photo upload updates instead of duplicating.
+  const [savedId, setSavedId] = useState<string | null>(member?.id ?? null);
+  useEffect(
+    () => () => {
+      if (preview) URL.revokeObjectURL(preview);
+    },
+    [preview],
+  );
+
+  function pick(input: HTMLInputElement) {
+    const next = input.files?.[0] ?? null;
+    setError(null);
+    if (next) {
+      const problem = photoProblem(next);
+      if (problem) {
+        input.value = "";
+        setFile(null);
+        setPreview(null);
+        return setError(problem);
+      }
+    }
+    setFile(next);
+    setPreview(next ? URL.createObjectURL(next) : null);
+    if (next && !f.photoAlt.trim()) setF((c) => ({ ...c, photoAlt: c.fullName.trim() ? `Portrait of ${c.fullName.trim()}` : "" }));
+  }
   const set = (k: keyof Form) => (e: { target: { value: string } }) =>
     setF((cur) => ({ ...cur, [k]: e.target.value, ...(k === "fullName" && !slugTouched ? { slug: slugify(e.target.value) } : {}) }));
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (f.photoUrl.trim() && !f.photoAlt.trim()) return setError("Describe the photo (alt text) for screen-reader users.");
+    if ((f.photoUrl.trim() || file) && f.photoAlt.trim().length < 3) return setError("Describe the photo (alt text) for screen-reader users.");
     setBusy(true);
     setError(null);
+    let id = savedId;
     try {
-      if (member) await api(`/v1/api/admin/advisory-board/${member.id}`, { method: "PATCH", body: toBody(f) });
-      else await api("/v1/api/admin/advisory-board", { method: "POST", body: toBody(f) });
+      setStep("Saving…");
+      if (id) await api(`/v1/api/admin/advisory-board/${id}`, { method: "PATCH", body: toBody(f) });
+      else {
+        id = (await api<{ member: Member }>("/v1/api/admin/advisory-board", { method: "POST", body: toBody(f) })).member.id;
+        setSavedId(id);
+      }
+      if (file) await uploadPortrait(id, file, f.photoAlt.trim(), setStep);
       onSaved(member ? `${f.fullName} updated.` : `${f.fullName} added${f.isPublished ? " and published" : " as a draft"}.`);
     } catch (err) {
-      setError(adminError(err));
+      const msg = uploadError(err);
+      setError(id && file ? `${f.fullName} was saved, but the photo was not: ${msg}` : msg);
     } finally {
       setBusy(false);
+      setStep(null);
     }
   }
 
@@ -344,13 +415,35 @@ function MemberDialog({ member, onClose, onSaved }: { member: Member | null; onC
           <Field label="Website" id="m-web">
             <input id="m-web" type="url" className="field" placeholder="https://" value={f.websiteUrl} onChange={set("websiteUrl")} />
           </Field>
-          <Field label="Photo URL" id="m-photo" hint="Or upload a portrait from the list after saving">
-            <input id="m-photo" type="url" className="field" placeholder="https://" value={f.photoUrl} onChange={set("photoUrl")} />
-          </Field>
-          <Field label="Photo alt text" id="m-alt">
-            <input id="m-alt" className="field" maxLength={300} value={f.photoAlt} onChange={set("photoAlt")} />
-          </Field>
         </div>
+        <fieldset className="rounded-xl border border-line p-4">
+          <legend className="px-1 text-sm font-medium">Photo</legend>
+          <div className="flex flex-col gap-4 sm:flex-row">
+            <div className="size-24 shrink-0 overflow-hidden rounded-xl border border-line bg-surface-2">
+              {(preview ?? f.photoUrl.trim()) && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={preview ?? f.photoUrl.trim()} alt="" className="size-full object-cover" />
+              )}
+            </div>
+            <div className="grid min-w-0 flex-1 gap-4">
+              <Field
+                label="Upload photo"
+                id="m-file"
+                hint={photoUploads ? "JPEG, PNG or WebP, up to 2 MB. A square crop of at least 400 × 400 px looks best. Uploaded when you save." : NO_BUCKET}
+              >
+                <input id="m-file" type="file" accept={PHOTO_TYPES.join(",")} className="field" disabled={!photoUploads || busy} onChange={(e) => pick(e.target)} />
+              </Field>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label={file ? "Photo URL (replaced by the upload)" : "Or photo URL"} id="m-photo">
+                  <input id="m-photo" type="url" className="field" placeholder="https://" disabled={!!file} value={f.photoUrl} onChange={set("photoUrl")} />
+                </Field>
+                <Field label="Photo alt text" id="m-alt">
+                  <input id="m-alt" className="field" maxLength={300} value={f.photoAlt} onChange={set("photoAlt")} />
+                </Field>
+              </div>
+            </div>
+          </div>
+        </fieldset>
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line pt-4">
           <div className="flex flex-wrap gap-6">
             <span className="flex items-center gap-2 text-sm">
@@ -363,7 +456,7 @@ function MemberDialog({ member, onClose, onSaved }: { member: Member | null; onC
             </span>
           </div>
           <Button type="submit" loading={busy}>
-            {member ? "Save changes" : "Add member"}
+            {step ?? (savedId ? "Save changes" : "Add member")}
           </Button>
         </div>
       </form>
@@ -371,7 +464,7 @@ function MemberDialog({ member, onClose, onSaved }: { member: Member | null; onC
   );
 }
 
-function PhotoDialog({ member, onClose, onSaved }: { member: Member; onClose: () => void; onSaved: () => void }) {
+function PhotoDialog({ member, photoUploads, onClose, onSaved }: { member: Member; photoUploads: boolean; onClose: () => void; onSaved: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [alt, setAlt] = useState(member.photoAlt ?? `Portrait of ${member.fullName}`);
@@ -386,8 +479,8 @@ function PhotoDialog({ member, onClose, onSaved }: { member: Member; onClose: ()
       setPreview(null);
       return;
     }
-    if (!["image/jpeg", "image/png", "image/webp"].includes(f.type)) return setError("Use a JPEG, PNG or WebP image.");
-    if (f.size > 2 * 1024 * 1024) return setError("The image must be 2 MB or smaller.");
+    const problem = photoProblem(f);
+    if (problem) return setError(problem);
     setFile(f);
     setPreview(URL.createObjectURL(f));
   }
@@ -397,21 +490,10 @@ function PhotoDialog({ member, onClose, onSaved }: { member: Member; onClose: ()
     if (!file) return;
     setError(null);
     try {
-      setStep("Checksumming…");
-      const sha256 = await sha256Hex(file);
-      setStep("Requesting upload…");
-      const signed = await api<{ objectKey: string; uploadUrl: string; method: string; headers: Record<string, string> }>(`/v1/api/admin/advisory-board/${member.id}/photo-upload`, {
-        method: "POST",
-        body: { contentType: file.type, sizeBytes: file.size, sha256 },
-      });
-      setStep("Uploading…");
-      const put = await fetch(signed.uploadUrl, { method: signed.method, headers: { "Content-Type": file.type, ...signed.headers }, body: file });
-      if (!put.ok) throw new Error(`Upload failed (${put.status}).`);
-      setStep("Verifying…");
-      await api(`/v1/api/admin/advisory-board/${member.id}/photo-complete`, { method: "POST", body: { objectKey: signed.objectKey, photoAlt: alt.trim() } });
+      await uploadPortrait(member.id, file, alt.trim(), setStep);
       onSaved();
     } catch (err) {
-      setError(err instanceof Error && !("code" in err) ? err.message : adminError(err));
+      setError(uploadError(err));
     } finally {
       setStep(null);
     }
@@ -421,6 +503,7 @@ function PhotoDialog({ member, onClose, onSaved }: { member: Member; onClose: ()
     <Dialog open onClose={() => !step && onClose()} title={`Portrait · ${member.fullName}`}>
       <form onSubmit={upload} className="space-y-4">
         {error && <Alert tone="danger">{error}</Alert>}
+        {!photoUploads && <Alert tone="info">{NO_BUCKET} Use Edit to set the photo URL.</Alert>}
         <div className="flex items-center gap-4">
           <div className="size-24 shrink-0 overflow-hidden rounded-xl border border-line bg-surface-2">
             {(preview ?? member.photoUrl) && (
@@ -431,7 +514,7 @@ function PhotoDialog({ member, onClose, onSaved }: { member: Member; onClose: ()
           <div className="text-sm text-muted">Square crop, at least 400 × 400 px. JPEG, PNG or WebP up to 2 MB. Stored on the public media bucket.</div>
         </div>
         <Field label="Image file" id="ph-file">
-          <input id="ph-file" type="file" accept="image/jpeg,image/png,image/webp" className="field" onChange={(e) => pick(e.target.files?.[0] ?? null)} />
+          <input id="ph-file" type="file" accept={PHOTO_TYPES.join(",")} className="field" disabled={!photoUploads} onChange={(e) => pick(e.target.files?.[0] ?? null)} />
         </Field>
         <Field label="Alt text" id="ph-alt">
           <input id="ph-alt" className="field" required minLength={3} maxLength={300} value={alt} onChange={(e) => setAlt(e.target.value)} />
@@ -442,6 +525,89 @@ function PhotoDialog({ member, onClose, onSaved }: { member: Member; onClose: ()
           </Button>
         </div>
       </form>
+    </Dialog>
+  );
+}
+
+function WelcomeCardDialog({ member, onClose }: { member: Member; onClose: () => void }) {
+  const [format, setFormat] = useState<CardFormat>("portrait");
+  const [photo, setPhoto] = useState<{ dataUrl: string | null; note: string | null } | null>(null);
+  const [card, setCard] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // The portrait comes through core as a data: URL, so the canvas is never tainted by a cross-origin image.
+  useEffect(() => {
+    let live = true;
+    if (!member.photoUrl) setPhoto({ dataUrl: null, note: "No photo on file, so the card shows initials." });
+    else
+      api<{ dataUrl: string }>(`/v1/api/admin/advisory-board/${member.id}/photo-data`)
+        .then((r) => live && setPhoto({ dataUrl: r.dataUrl, note: null }))
+        .catch((err) => live && setPhoto({ dataUrl: null, note: `${adminError(err)} The card shows initials instead.` }));
+    return () => {
+      live = false;
+    };
+  }, [member.id, member.photoUrl]);
+
+  useEffect(() => {
+    if (!photo) return;
+    let live = true;
+    let url: string | null = null;
+    setCard(null);
+    setError(null);
+    renderWelcomeCard(member, photo.dataUrl, format)
+      .then(cardBlob)
+      .then((blob) => {
+        if (!live) return;
+        url = URL.createObjectURL(blob);
+        setCard(url);
+      })
+      .catch((err) => live && setError(err instanceof Error ? err.message : "Could not draw the card."));
+    return () => {
+      live = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [member, photo, format]);
+
+  function download() {
+    if (!card) return;
+    const a = document.createElement("a");
+    a.href = card;
+    a.download = `altvivo-welcome-${member.slug}-${CARD_SIZES[format].w}x${CARD_SIZES[format].h}.png`;
+    document.body.append(a);
+    a.click();
+    a.remove();
+  }
+
+  const { w, h } = CARD_SIZES[format];
+  return (
+    <Dialog open onClose={onClose} title={`Welcome card · ${member.fullName}`} wide>
+      <div className="space-y-4">
+        {error && <Alert tone="danger">{error}</Alert>}
+        {photo?.note && <Alert tone="info">{photo.note}</Alert>}
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Card size">
+          {(Object.keys(CARD_SIZES) as CardFormat[]).map((k) => (
+            <Button key={k} size="sm" variant={k === format ? "primary" : "outline"} role="radio" aria-checked={k === format} onClick={() => setFormat(k)}>
+              {CARD_SIZES[k].label}
+            </Button>
+          ))}
+        </div>
+        <div className="mx-auto w-full max-w-sm overflow-hidden rounded-xl border border-line bg-surface-2" style={{ aspectRatio: `${w} / ${h}` }}>
+          {card ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={card} alt={`Welcome on board card for ${member.fullName}`} className="size-full" />
+          ) : (
+            <span className="flex size-full items-center justify-center text-sm text-muted">Drawing the card…</span>
+          )}
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={download} disabled={!card}>
+            <Download className="size-4" aria-hidden /> Download PNG
+          </Button>
+        </div>
+      </div>
     </Dialog>
   );
 }

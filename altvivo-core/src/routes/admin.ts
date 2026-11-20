@@ -6,6 +6,7 @@ import type { Deps } from '../deps.js';
 import { audit, withAudit } from '../lib/audit.js';
 import { HttpError, badRequest, conflict, notFound, pgCode } from '../lib/errors.js';
 import { templates } from '../lib/mailer.js';
+import { IMAGE_SIGNATURES, RemoteImageError, fetchRemoteImage } from '../lib/remote-image.js';
 import { actorOf, parse, requireUser } from '../plugins/security.js';
 import { invalidateRegistry, toPublicApp } from '../services/registry.js';
 import { assertTotp } from './auth.js';
@@ -76,11 +77,7 @@ const PhotoUpload = z.object({
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
 });
 
-const IMAGE_MAGIC: Record<string, (b: Buffer) => boolean> = {
-  'image/jpeg': (b) => b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
-  'image/png': (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
-  'image/webp': (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
-};
+const IMAGE_MAGIC = IMAGE_SIGNATURES as Record<string, (b: Buffer) => boolean>;
 
 export default async function adminRoutes(app: FastifyInstance, d: Deps) {
   const superadmin = requireUser(d, { roles: ['SUPERADMIN'], mfa: true });
@@ -235,7 +232,29 @@ export default async function adminRoutes(app: FastifyInstance, d: Deps) {
   // ===================================================== advisory board =====
   app.get('/v1/api/admin/advisory-board', opts, async () => ({
     members: await d.prisma.advisoryBoardMember.findMany({ orderBy: [{ sortOrder: 'asc' }, { fullName: 'asc' }] }),
+    /** False until R2_BUCKET_PUBLIC / R2_PUBLIC_BASE_URL are set: the form then offers the URL field only. */
+    photoUploads: !!d.cfg.R2_BUCKET_PUBLIC,
   }));
+
+  /**
+   * The member's stored portrait as a data URL, so the browser can draw it on
+   * the welcome-card canvas without tainting it (pasted photo hosts rarely send
+   * CORS headers). Only the member's own photoUrl is fetched, through the SSRF
+   * guards in fetchRemoteImage.
+   */
+  app.get('/v1/api/admin/advisory-board/:id/photo-data', opts, async (req) => {
+    const { id } = parse(UuidParam, req.params);
+    const m = await d.prisma.advisoryBoardMember.findUnique({ where: { id }, select: { photoUrl: true } });
+    if (!m) throw notFound();
+    if (!m.photoUrl) throw notFound('NO_PHOTO', 'This member has no photo');
+    try {
+      const img = await fetchRemoteImage(m.photoUrl);
+      return { contentType: img.contentType, dataUrl: `data:${img.contentType};base64,${img.body.toString('base64')}` };
+    } catch (err) {
+      if (err instanceof RemoteImageError) throw new HttpError(422, 'PHOTO_UNAVAILABLE', `Could not load the photo: ${err.message}`);
+      throw err;
+    }
+  });
 
   const saveMember = async (fn: () => Promise<unknown>) => {
     try {

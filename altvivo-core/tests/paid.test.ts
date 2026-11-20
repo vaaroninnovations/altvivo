@@ -547,6 +547,57 @@ describe('SUPERADMIN licences, pricing, CMS and audit', () => {
     expect((await admin.b.request('DELETE', `/v1/api/admin/advisory-board/${json(hidden).member.id}`)).statusCode).toBe(204);
   });
 
+  it('advisory portraits: uploads are validated server-side, and the card photo proxy refuses private hosts', async () => {
+    const m = json(
+      await admin.b.request('POST', '/v1/api/admin/advisory-board', { slug: 'photo-member', fullName: 'Photo Member', designation: 'Professor', affiliation: 'Uni', bio: 'Has a portrait to upload.' }),
+    ).member;
+    const sha256 = 'a'.repeat(64);
+    // Not configured: the list says so and the upload route refuses.
+    expect(json(await admin.b.request('GET', '/v1/api/admin/advisory-board')).photoUploads).toBe(false);
+    const off = await admin.b.request('POST', `/v1/api/admin/advisory-board/${m.id}/photo-upload`, { contentType: 'image/jpeg', sizeBytes: 1000, sha256 });
+    expect(off.statusCode).toBe(409);
+    expect(json(off).error.code).toBe('PUBLIC_BUCKET_NOT_CONFIGURED');
+
+    const cfg = ctx.deps.cfg as { R2_BUCKET_PUBLIC: string; R2_PUBLIC_BASE_URL: string };
+    cfg.R2_BUCKET_PUBLIC = 'altvivo-public';
+    cfg.R2_PUBLIC_BASE_URL = 'https://media.altvivo.test/';
+    try {
+      expect(json(await admin.b.request('GET', '/v1/api/admin/advisory-board')).photoUploads).toBe(true);
+      // Type and size are checked before anything is signed.
+      expect((await admin.b.request('POST', `/v1/api/admin/advisory-board/${m.id}/photo-upload`, { contentType: 'image/gif', sizeBytes: 1000, sha256 })).statusCode).toBe(400);
+      expect((await admin.b.request('POST', `/v1/api/admin/advisory-board/${m.id}/photo-upload`, { contentType: 'image/png', sizeBytes: 3 * 1024 * 1024, sha256 })).statusCode).toBe(400);
+
+      // A file that is not the declared image is deleted and rejected.
+      const html = Buffer.from('<html><script>alert(1)</script></html>');
+      const bad = json(await admin.b.request('POST', `/v1/api/admin/advisory-board/${m.id}/photo-upload`, { contentType: 'image/png', sizeBytes: html.length, sha256 }));
+      ctx.storage.objects.set(bad.objectKey, html);
+      const rejected = await admin.b.request('POST', `/v1/api/admin/advisory-board/${m.id}/photo-complete`, { objectKey: bad.objectKey, photoAlt: 'Portrait' });
+      expect(rejected.statusCode).toBe(422);
+      expect(ctx.storage.removed).toContain(bad.objectKey);
+
+      const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(500, 1)]);
+      const up = json(await admin.b.request('POST', `/v1/api/admin/advisory-board/${m.id}/photo-upload`, { contentType: 'image/png', sizeBytes: png.length, sha256 }));
+      expect(up.objectKey).toMatch(new RegExp(`^advisory/${m.id}/[0-9a-f-]{36}\.png$`));
+      ctx.storage.objects.set(up.objectKey, png);
+      const done = json(await admin.b.request('POST', `/v1/api/admin/advisory-board/${m.id}/photo-complete`, { objectKey: up.objectKey, photoAlt: 'Portrait of Photo Member' }));
+      expect(done.member.photoUrl).toBe(`https://media.altvivo.test/${up.objectKey}`);
+    } finally {
+      cfg.R2_BUCKET_PUBLIC = '';
+      cfg.R2_PUBLIC_BASE_URL = '';
+    }
+
+    // Card photo proxy: only the member's own https photo, never a private address.
+    const none = json(await admin.b.request('POST', '/v1/api/admin/advisory-board', { slug: 'no-photo', fullName: 'No Photo', designation: 'Reader', affiliation: 'Uni', bio: 'No portrait on file.' })).member;
+    expect(json(await admin.b.request('GET', `/v1/api/admin/advisory-board/${none.id}/photo-data`)).error.code).toBe('NO_PHOTO');
+    for (const photoUrl of ['https://127.0.0.1/p.jpg', 'https://[::1]/p.jpg', 'https://10.0.0.5/p.jpg', 'https://localhost/p.jpg']) {
+      await admin.b.request('PATCH', `/v1/api/admin/advisory-board/${none.id}`, { photoUrl, photoAlt: 'Portrait' });
+      const r = await admin.b.request('GET', `/v1/api/admin/advisory-board/${none.id}/photo-data`);
+      expect(r.statusCode).toBe(422);
+      expect(json(r).error.message).toMatch(/not public/);
+    }
+    for (const id of [m.id, none.id]) await admin.b.request('DELETE', `/v1/api/admin/advisory-board/${id}`);
+  });
+
   it('dashboard reports revenue and licences', async () => {
     const d = json(await admin.b.request('GET', '/v1/api/admin/dashboard'));
     expect(d.revenueLast30Days.find((r: { currency: string }) => r.currency === 'INR').grossMinor).toBeGreaterThan(0);
