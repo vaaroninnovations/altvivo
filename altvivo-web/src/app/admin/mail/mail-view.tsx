@@ -135,6 +135,32 @@ export function MailView() {
     await reload();
   }, [reload]);
 
+  // Check for new mail every 30 s while the tab is visible, and at once when it
+  // becomes visible again. Silent (no spinner), and skipped while the admin is
+  // mid-task: older pages loaded, rows ticked, or writing a message.
+  const busy = more.length > 0 || selected.size > 0 || draft !== null;
+  const poll = useRef({ path, busy, setData });
+  poll.current = { path, busy, setData };
+  useEffect(() => {
+    const check = async () => {
+      const p = poll.current;
+      if (document.visibilityState !== "visible" || p.busy) return;
+      try {
+        const fresh = await api<ListResponse>(p.path);
+        if (poll.current.path === p.path && !poll.current.busy) p.setData(fresh);
+      } catch {
+        // Ignore: the next check tries again; the Refresh button shows real errors.
+      }
+    };
+    const timer = window.setInterval(check, 30_000);
+    const onVisible = () => document.visibilityState === "visible" && void check();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
   const patchRows = (fn: (list: MailRow[]) => MailRow[]) => {
     if (data) setData({ ...data, messages: fn(data.messages) });
     setMore(fn);
