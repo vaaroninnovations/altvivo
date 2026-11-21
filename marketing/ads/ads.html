@@ -239,6 +239,88 @@
   </div>
 </section>
 
+<!-- 7 + 8. XPRISM: every feature (feed 1080 x 1350, story 1080 x 1920). Filled by the script below. -->
+<style>
+  .xf { padding: 64px; }
+  .xf .cats { display: grid; gap: 18px; }
+  .xf .cat { background: #fff; border: 1.5px solid var(--line); border-radius: 20px; padding: 18px 22px; }
+  .xf .cat-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .xf .cat-t { font-weight: 700; color: var(--fg); }
+  .xf .cat-n { font-family: "Source Serif 4", serif; font-weight: 600; line-height: 1; }
+  .xf .cat ul { list-style: none; margin-top: 10px; color: var(--muted); }
+  .xf .cat li { display: inline; }
+  .xf .cat li:not(:last-child)::after { content: " ·"; color: #b4add0; }
+  .xf .feat { border-radius: 24px; color: #fff; background: linear-gradient(135deg, #0a14d6, #4b1fd8 55%, #9b0af0); }
+  .xf .feat-col h3 { font-family: "JetBrains Mono", monospace; letter-spacing: .14em; text-transform: uppercase; font-weight: 600; opacity: .8; }
+  .xf .fi { display: flex; gap: 10px; align-items: flex-start; }
+  .xf .fi::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: #7cf0c8; margin-top: .55em; }
+  .xf .comp { display: flex; flex-wrap: wrap; gap: 10px; }
+  .xf .comp span { border: 1.5px solid #d3cec3; background: #fff; border-radius: 999px; color: var(--muted); font-weight: 600; }
+</style>
+
+<section class="ad light grid-bg xf" id="xprism-features" style="width:1080px;height:1350px" data-variant="feed"></section>
+<section class="ad light grid-bg xf" id="xprism-features-story" style="width:1080px;height:1920px;padding:96px 72px" data-variant="story"></section>
+
+<script>
+  // All 44 XPRISM experiments, grouped (source: XPRISM experiments/ folder, 01-44).
+  const CATS = [
+    ["Organ bath & bioassays", ["ACh DRC on frog rectus", "Physostigmine & atropine on rat ileum", "Histamine bioassays (matching, bracketing)", "Three- & four-point bioassay", "pA2 / Schild plot", "Ciliary motility, frog oesophagus", "Salt solutions & organ-bath set-up"], 9],
+    ["CNS & behaviour", ["MES & PTZ seizures", "Rota‑rod", "Actophotometer", "Catalepsy & stereotypy", "Elevated plus maze", "Light-dark box", "Y‑maze", "Radial arm maze", "Morris water maze", "Barnes maze", "Pole climbing", "Forced swim test"], 13],
+    ["Analgesia, inflammation & GI", ["Eddy's hot plate", "Tail‑flick", "Carrageenan paw oedema", "Pylorus-ligation ulcer", "Charcoal meal motility", "Castor-oil diarrhoea"], 6],
+    ["Eye, heart & metabolism", ["Drugs on the rabbit eye", "Local anaesthetics", "Blood pressure & heart rate", "Phenobarbitone sleeping time"], 4],
+    ["Molecular & biochemical", ["PCR analysis", "MTT assay & IC50", "ELISA cytokines", "Serum biochemistry", "Antioxidant / oxidative stress", "Molecular docking"], 6],
+    ["Foundations, clinical & ethics", ["Intro to experimental pharmacology", "Routes of administration", "Blood collection", "IAEC protocol", "Clinical trial design", "Pharmacovigilance (Naranjo)"], 6],
+  ];
+  const FEATS = [
+    ["For faculty", ["Batches & class codes", "CSV / Excel enrolment", "Due dates, attempts, marks", "Timed exam mode", "Grading queue & feedback", "Marks export, viva analysis"]],
+    ["For students", ["Observation sheets & viva", "Instant provisional score", "Own randomised unknowns", "Free practice mode", "Marks & feedback together", "Download your own data"]],
+    ["For colleges", ["Admin, faculty & lab roles", "Experiments on or off", "Audit log & data requests", "3Rs ethics agreement", "DPDP-ready privacy", "One AltVivo sign-in"]],
+  ];
+  const arrow = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+
+  function buildXF(el) {
+    const story = el.dataset.variant === "story";
+    const s = story
+      ? { h1: 84, eyebrow: 20, cols: 2, catT: 24, catN: 44, item: 19.5, featH: 15, feat: 19, featCols: 3, compF: 17, cta: 32, logo: 54, xlogo: 92, gap: 28 }
+      : { h1: 56, eyebrow: 16, cols: 3, catT: 19, catN: 34, item: 15.5, featH: 13, feat: 16, featCols: 3, compF: 15, cta: 23, logo: 40, xlogo: 60, gap: 22 };
+    const cats = CATS.map(([t, items, n]) => `
+      <div class="cat">
+        <div class="cat-h"><span class="cat-t" style="font-size:${s.catT}px">${t}</span><span class="cat-n grad-text-d" style="font-size:${s.catN}px">${n}</span></div>
+        <ul style="font-size:${s.item}px;line-height:1.42">${items.map(i => `<li>${i}</li>`).join(" ")}</ul>
+      </div>`).join("");
+    const feats = FEATS.map(([h, items]) => `
+      <div class="feat-col">
+        <h3 style="font-size:${s.featH}px;margin-bottom:${story ? 14 : 12}px">${h}</h3>
+        <div style="display:grid;gap:${story ? 10 : 7}px;font-size:${s.feat}px;line-height:1.3">${items.map(i => `<div class="fi">${i}</div>`).join("")}</div>
+      </div>`).join("");
+    el.innerHTML = `
+      <div class="glow" style="width:620px;height:620px;right:-240px;top:-220px;background:rgb(155 10 240 / .16)"></div>
+      <div class="glow" style="width:560px;height:560px;left:-240px;bottom:-240px;background:rgb(10 20 214 / .12)"></div>
+      <div style="position:relative;height:100%;display:flex;flex-direction:column;gap:${s.gap}px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <img src="brand/altvivo-wordmark.png" style="height:${s.logo}px">
+          <div style="background:#fff;border:1.5px solid var(--line);border-radius:18px;padding:${story ? "12px 20px" : "8px 14px"}"><img src="brand/xprism-logo.png" style="height:${s.xlogo}px;display:block"></div>
+        </div>
+        <div>
+          <div class="mono" style="font-size:${s.eyebrow}px;color:#4b1fd8">XPRISM · virtual pharmacology lab · everything included</div>
+          <h1 class="serif" style="margin-top:${story ? 22 : 14}px;font-size:${s.h1}px;line-height:1.0;font-weight:600;letter-spacing:-.02em">
+            44 practicals.<br><em class="grad-text-d" style="padding-right:6px">One complete teaching lab.</em>
+          </h1>
+        </div>
+        <div class="cats" style="grid-template-columns:repeat(${s.cols},1fr)">${cats}</div>
+        <div class="feat" style="padding:${story ? "36px 40px" : "26px 30px"};display:grid;grid-template-columns:repeat(${s.featCols},1fr);gap:${story ? 30 : 26}px">${feats}</div>
+        <div style="margin-top:auto;display:flex;flex-direction:column;gap:${story ? 34 : 22}px">
+          <div class="comp" style="${story ? "justify-content:center" : ""}">${["Supports the 3Rs", "CCSEA & PCI aligned", "B.Pharm · M.Pharm · MBBS", "DPDP Act 2023 ready"].map(c => `<span style="font-size:${s.compF}px;padding:${story ? "10px 18px" : "8px 16px"}">${c}</span>`).join("")}</div>
+          <div style="display:flex;align-items:center;justify-content:${story ? "center" : "space-between"};gap:32px;${story ? "flex-direction:column" : ""}">
+            <div class="cta" style="font-size:${s.cta}px;padding:${story ? "30px 52px" : "20px 32px"}">Start your free month ${arrow}</div>
+            <div class="url" style="font-size:${story ? 26 : 22}px;color:var(--muted)">altvivo.bio</div>
+          </div>
+        </div>
+      </div>`;
+  }
+  document.querySelectorAll(".xf").forEach(buildXF);
+</script>
+
 <script>
   const id = new URLSearchParams(location.search).get("ad");
   const all = document.querySelectorAll(".ad");
