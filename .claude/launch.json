@@ -58,6 +58,14 @@
       "port": 8790
     },
     {
+      "name": "xprism-static",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        ".claude/xprism-static.mjs"
+      ],
+      "port": 8096
+    },
+    {
       "name": "preview-core",
       "runtimeExecutable": "node",
       "runtimeArgs": [
