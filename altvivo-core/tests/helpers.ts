@@ -172,6 +172,8 @@ export async function createTestContext(env: Record<string, string> = {}): Promi
     R2_SECRET_ACCESS_KEY: 'secret',
     SMTP_HOST: 'smtp.test',
     LOGIN_LOCKOUT_THRESHOLD: '4',
+    // Suites that test paid gating need verified accounts without a free month; free-month-auto.test.ts turns it on.
+    TRIAL_AUTO_GRANT: 'false',
     ...SELLER_ENV,
     ...env,
   });

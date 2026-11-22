@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Check, CreditCard, ShieldCheck } from "lucide-react";
-import { TrialRequestForm, TrialStatus, TrialSteps } from "@/components/trial";
+import { FreeMonthStart, TrialStatus, TrialSteps } from "@/components/trial";
 import { ButtonLink, Card, SectionHeading } from "@/components/ui";
 import { coreGet, getTrialOffer } from "@/lib/server/core";
 import { readSession } from "@/lib/server/session";
@@ -9,7 +9,7 @@ import type { WorkspaceData } from "@/lib/types";
 
 export const metadata: Metadata = {
   title: "One month free",
-  description: "Request one month of free, full access to XPRISM and aMaze on AltVivo. No card needed; nothing is charged when the month ends.",
+  description: "Create an account and get one month of free, full access to XPRISM and aMaze on AltVivo. No card needed; nothing is charged when the month ends.",
 };
 export const dynamic = "force-dynamic";
 
@@ -68,17 +68,19 @@ export default async function FreeMonthPage() {
         </div>
 
         <Card className="glow h-fit p-6 sm:p-8">
-          <h2 className="text-lg font-semibold">{canAsk ? "Request your free month" : "Your free month"}</h2>
+          <h2 className="text-lg font-semibold">{canAsk ? "Start your free month" : "Your free month"}</h2>
           <p className="mb-6 mt-1 text-sm text-muted">
-            {canAsk ? "We reply by email, usually within one working day." : "Each person gets one free month; here is where yours stands."}
+            {canAsk
+              ? `No form and no waiting: create your account, verify your email, and your ${offer.days} days start at once.`
+              : "Each person gets one free month; here is where yours stands."}
           </p>
-          {trial && (
+          {trial && where !== "declined" && (
             <div className="mb-6">
               <TrialStatus trial={trial} />
             </div>
           )}
           {canAsk ? (
-            <TrialRequestForm apps={offer.apps} days={offer.days} defaultName={s?.name ?? ""} defaultEmail={s?.email ?? ""} signedIn={!!s} />
+            <FreeMonthStart days={offer.days} signedIn={!!s} emailVerified={!!s?.emailVerified} />
           ) : (
             <div className="flex flex-wrap gap-3">
               <ButtonLink href="/workspace">Open my applications</ButtonLink>

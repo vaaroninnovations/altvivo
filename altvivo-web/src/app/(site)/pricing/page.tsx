@@ -39,8 +39,8 @@ export default async function PricingPage({ searchParams }: { searchParams: Prom
               charged when it ends; pick a plan below whenever you are ready.
             </p>
           </div>
-          <ButtonLink href="/free-month" size="lg" className="shrink-0">
-            Request your free month
+          <ButtonLink href="/register?trial=1" size="lg" className="shrink-0">
+            Start your free month
           </ButtonLink>
         </div>
 

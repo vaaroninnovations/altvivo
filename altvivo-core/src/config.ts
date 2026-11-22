@@ -56,6 +56,12 @@ const EnvSchema = z.object({
   PAY_PER_USE_PRICE_PAISE: z.coerce.number().int().min(100).max(10_000_000).default(2000),
   /** Length of the free access a SUPERADMIN approves from a "one month free" request. */
   TRIAL_DAYS: z.coerce.number().int().min(1).max(90).default(30),
+  /**
+   * Every account gets its free month automatically once its e-mail address is
+   * verified (no request form, no SuperAdmin review). Set false to go back to
+   * approving each request at /admin/trials.
+   */
+  TRIAL_AUTO_GRANT: bool.default('true'),
   /** Bearer token for POST /v1/webhooks/mail/inbound (replies forwarded into the SuperAdmin mailbox); empty disables it. */
   MAIL_INBOUND_TOKEN: z.string().default('').refine((v) => v === '' || v.length >= 32, 'must be at least 32 characters'),
 

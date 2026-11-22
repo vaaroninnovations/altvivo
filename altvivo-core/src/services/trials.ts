@@ -1,6 +1,7 @@
 import type { TrialRequest } from '@prisma/client';
 import type { Deps } from '../deps.js';
 import { audit, withAudit, type AuditActor, type Tx } from '../lib/audit.js';
+import { templates } from '../lib/mailer.js';
 
 /** Reference stamped on every licence of a free month; user_access_claims() reports it as source 'trial'. */
 export const trialReference = (requestId: string) => `TRIAL-${requestId.slice(0, 8).toUpperCase()}`;
@@ -115,22 +116,70 @@ export async function activateTrial(tx: Tx, request: TrialRequest, userId: strin
 }
 
 /**
- * Called when an account proves its e-mail address: starts the free month
- * that was approved for that address before the account existed (or before
- * it was verified). Never throws - sign-up must not fail because of it.
+ * The SUPERADMIN an automatic free month is granted in the name of: the
+ * longest-standing active one (the database accepts no other grantor for a
+ * MANUAL licence).
+ */
+async function autoApprover(tx: Tx): Promise<string | null> {
+  const u = await tx.user.findFirst({ where: { role: 'SUPERADMIN', disabledAt: null }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+  return u?.id ?? null;
+}
+
+/**
+ * Called whenever an account with a proven e-mail address signs in or verifies
+ * it. Starts the person's one free month:
+ *  - a request a SUPERADMIN already approved starts now;
+ *  - with TRIAL_AUTO_GRANT (the default), a pending request is approved on the
+ *    spot, and an account that never asked gets one created and started - so
+ *    creating an account is all it takes.
+ * Nothing happens once the address has had its free month. Never throws:
+ * sign-up and sign-in must not fail because of it.
  */
 export async function claimApprovedTrial(d: Deps, user: { id: string; email: string }, actor: AuditActor, log?: { warn: (o: unknown, m: string) => void }): Promise<boolean> {
   try {
-    const request = await d.prisma.trialRequest.findFirst({ where: { email: user.email, status: 'APPROVED' } });
-    if (!request) return false;
-    await withAudit(d.prisma, { ...actor, actorId: user.id, actorType: 'USER' }, async (tx) => {
-      const fresh = await tx.trialRequest.updateMany({ where: { id: request.id, status: 'APPROVED' }, data: { updatedAt: new Date() } });
-      if (fresh.count === 1) await activateTrial(tx, request, user.id);
+    const known = await d.prisma.trialRequest.findMany({ where: { OR: [{ email: user.email }, { userId: user.id }] }, select: { status: true } });
+    if (known.some((r) => r.status === 'ACTIVE')) return false;
+    if (!d.cfg.TRIAL_AUTO_GRANT && !known.some((r) => r.status === 'APPROVED')) return false;
+
+    const started = await withAudit(d.prisma, { ...actor, actorId: user.id, actorType: 'USER' }, async (tx) => {
+      // Two sign-ins at once must not both start a month.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`trial:${user.email.toLowerCase()}`}))`;
+      const account = await tx.user.findUnique({ where: { id: user.id }, select: { fullName: true, affiliation: true, emailVerifiedAt: true, disabledAt: true } });
+      if (!account?.emailVerifiedAt || account.disabledAt) return null;
+      const rows = await tx.trialRequest.findMany({ where: { OR: [{ email: user.email }, { userId: user.id }] }, orderBy: { createdAt: 'desc' } });
+      if (rows.some((r) => r.status === 'ACTIVE')) return null;
+
+      let request = rows.find((r) => r.status === 'APPROVED') ?? null;
+      if (!request) {
+        if (!d.cfg.TRIAL_AUTO_GRANT) return null;
+        const approver = await autoApprover(tx);
+        if (!approver) {
+          log?.warn({ userId: user.id }, 'no active SUPERADMIN to grant the free month in the name of');
+          return null;
+        }
+        const decided = { status: 'APPROVED' as const, decidedBy: approver, decidedAt: new Date(), decisionNote: 'Approved automatically when the account was created', userId: user.id };
+        const pending = rows.find((r) => r.status === 'PENDING');
+        request = pending
+          ? await tx.trialRequest.update({ where: { id: pending.id }, data: decided })
+          : await tx.trialRequest.create({
+              data: {
+                ...decided, name: account.fullName, email: user.email, institution: account.affiliation?.trim() || 'Not given',
+                useCase: 'Account created on altvivo.bio', days: d.cfg.TRIAL_DAYS, appIds: await trialAppIds(d),
+              },
+            });
+        await audit(tx, 'TRIAL.AUTO_APPROVED', request.id, { user_id: user.id, days: request.days, from_request: !!pending });
+      }
+      return activateTrial(tx, request, user.id);
     });
+    if (!started) return false;
     await d.revocations.markClaimsStale([user.id]);
+    const names = (await d.prisma.appRegistry.findMany({ where: { appId: { in: started.appIds } }, orderBy: { sortOrder: 'asc' }, select: { name: true } })).map((a) => a.name);
+    await d.mailer
+      .send({ to: user.email, ...templates.freeMonthStarted(started.name, started.days, names, `${d.cfg.webOrigin}/workspace`, started.endsAt!.toISOString().slice(0, 10)) })
+      .catch((err) => log?.warn({ err, userId: user.id }, 'free month email failed'));
     return true;
   } catch (err) {
-    log?.warn({ err, userId: user.id }, 'approved free month could not be started');
+    log?.warn({ err, userId: user.id }, 'free month could not be started');
     return false;
   }
 }

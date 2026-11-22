@@ -1,15 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight, CalendarClock, FileText, Gift, History, Lock, Rocket, ShieldCheck, Wrench } from "lucide-react";
 import { AppIcon, AppLogo, hasAppLogo } from "@/components/brand";
 import type { Viewer } from "@/components/checkout";
 import { Alert, Button, ButtonLink, Card, LicenceBadge, Pill, StatusBadge, entitled, formatBytes, formatDate } from "@/components/ui";
-import { TrialStatus } from "@/components/trial";
+import { StartFreeMonthButton, TrialStatus } from "@/components/trial";
 import { UnlockDialog } from "@/components/unlock";
 import { BuyAnalysesDialog } from "@/components/usage";
-import { api } from "@/lib/api";
+import { api, refreshSession } from "@/lib/api";
 import { isAvailable } from "@/lib/catalog";
 import { trialLength, trialState } from "@/lib/trial";
 import type { CatalogResponse, WorkspaceApp, WorkspaceData } from "@/lib/types";
@@ -211,6 +211,15 @@ export function LauncherView({
   const trial = trialState(data.trial);
   const canAskFree = trial === "none" || trial === "declined";
 
+  // Just verified (and the free month just started), but this page was rendered
+  // from a token minted before that: swap it once so every badge is current.
+  useEffect(() => {
+    if (flash !== "verified" || user.emailVerified) return;
+    void refreshSession().then((ok) => {
+      if (ok) window.location.replace("/workspace?verified=1");
+    });
+  }, [flash, user.emailVerified]);
+
   async function resend() {
     setResent("busy");
     try {
@@ -262,18 +271,16 @@ export function LauncherView({
       <div className="space-y-3">
         {flash === "verified" && (
           <Alert tone="success" title="Email verified">
-            {trial === "running" ? "Your free month has started." : "You can now start your free month, buy licences and receive invoices at this address."}
+            {trial === "running" ? "Your free month has started." : "You can now buy licences and receive invoices at this address."}
           </Alert>
         )}
         {data.trial && trial !== "none" && <TrialStatus trial={data.trial} />}
-        {canAskFree && licensed === 0 && user.tier !== "VIP" && (
+        {canAskFree && user.emailVerified && licensed === 0 && user.tier !== "VIP" && (
           <Alert
             tone="info"
             title={`Try AltVivo free for ${trialLength(data.trialDays)}`}
             action={
-              <ButtonLink href="/free-month" size="sm">
-                <Gift className="size-4" aria-hidden /> Request it
-              </ButtonLink>
+              <StartFreeMonthButton />
             }
           >
             {data.trialDays} days of full access to every live application. No card needed, nothing charged when it ends.

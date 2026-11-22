@@ -93,15 +93,12 @@ export function RegisterForm({ next, oauthPendingId, defaultEmail = "", freeMont
 
       <div className="mt-8 space-y-6">
         {freeMonth ? (
-          <Alert tone="success" title="Your free month is approved">
-            Create your account with the email address we approved{defaultEmail ? <> (<span className="readout">{defaultEmail}</span>)</> : null} and verify it. Your free access starts at that moment.
+          <Alert tone="success" title="Your free month is included">
+            Create your account{defaultEmail ? <> with <span className="readout">{defaultEmail}</span></> : null} and verify your email. Full access to every application starts at that moment: no form, no waiting.
           </Alert>
         ) : (
           <p className="rounded-xl border border-accent/30 bg-accent-soft px-4 py-3 text-sm text-muted">
-            New here? Your first month can be free.{" "}
-            <Link href="/free-month" className="font-medium text-accent-ink hover:underline">
-              Request one month free
-            </Link>
+            <span className="font-medium text-fg">Your first month is free.</span> It starts automatically when you verify your email. No card needed.
           </p>
         )}
         {pending && (

@@ -215,8 +215,8 @@ export default async function HomePage() {
               product: nothing is hidden, and your reports and exports stay in your account.
             </p>
             <div className="mt-7 flex flex-wrap gap-3">
-              <ButtonLink href="/free-month" size="lg">
-                Request your free month <ArrowRight className="size-4" aria-hidden />
+              <ButtonLink href="/register?trial=1" size="lg">
+                Start your free month <ArrowRight className="size-4" aria-hidden />
               </ButtonLink>
               <ButtonLink href="/pricing" size="lg" variant="outline">
                 See what it costs afterwards

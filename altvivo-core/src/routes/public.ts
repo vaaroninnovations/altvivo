@@ -11,7 +11,7 @@ import { userAgent } from '../lib/net.js';
 import { actorOf, parse } from '../plugins/security.js';
 import { deliverToInbox } from '../services/mailbox.js';
 import { listApps } from '../services/registry.js';
-import { toApiTrial, trialAppIds } from '../services/trials.js';
+import { claimApprovedTrial, toApiTrial, trialAppIds } from '../services/trials.js';
 
 export const CONTACT_CATEGORIES = ['sales', 'institutional', 'support', 'billing', 'partnership', 'press', 'privacy', 'other'] as const;
 
@@ -240,6 +240,11 @@ export default async function publicRoutes(app: FastifyInstance, d: Deps) {
     } catch (err) {
       if (pgCode(err) === '23505') return duplicate();
       throw err;
+    }
+    // Automatic free month: a signed-in, verified account starts it right away, no review needed.
+    if (account && userId && d.cfg.TRIAL_AUTO_GRANT && (await claimApprovedTrial(d, { id: userId, email: emailAddr }, actorOf(req), req.log))) {
+      const started = await d.prisma.trialRequest.findUniqueOrThrow({ where: { id: request.id } });
+      return reply.code(201).send({ status: 'received', trial: toApiTrial(started) });
     }
     await d.mailer
       .send({ to: d.cfg.SUPPORT_EMAIL, replyTo: emailAddr, ...templates.trialRequestNotification({ name: body.name, email: emailAddr, institution: body.institution, designation: body.designation || null, apps: appIds, useCase: body.useCase, id: request.id }, `${d.cfg.webOrigin}/admin/trials`) })

@@ -11,7 +11,7 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
   const next = safeNext(sp.redirect ?? sp.next);
   if ((await readSession()).session) redirect(next);
   const oauth = sp.oauth && /^[A-Za-z0-9_-]{20,64}$/.test(sp.oauth) ? sp.oauth : null;
-  // The "free month approved" email links here with the approved address filled in.
+  // Free-month links (?trial=1) land here; an approval email may also fill in the address.
   const email = sp.email && /^[^@\s]{1,64}@[^@\s]{1,190}$/.test(sp.email) ? sp.email : "";
   return <RegisterForm next={next} oauthPendingId={oauth} defaultEmail={email} freeMonth={sp.trial === "1"} />;
 }

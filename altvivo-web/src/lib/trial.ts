@@ -5,10 +5,11 @@ export const DEFAULT_TRIAL_DAYS = 30;
 
 export const FREE_MONTH_PATH = "/free-month";
 
+/** Creating an account is all the free month takes: it starts when the address is verified. */
+export const FREE_MONTH_SIGNUP = "/register?trial=1";
+
 /** "one month" for the standard 30 days, otherwise "14 days". */
 export const trialLength = (days: number) => (days >= 28 && days <= 31 ? "one month" : `${days} days`);
-
-export const TRIAL_ROLES = ["Faculty / teaching staff", "Principal investigator", "Researcher / scientist", "PhD scholar", "Student", "Lab or department administrator", "Other"] as const;
 
 /** Whole days left of a running free month (0 once it is over). */
 export const trialDaysLeft = (t: Pick<Trial, "endsAt">) => (t.endsAt ? Math.max(0, Math.ceil((new Date(t.endsAt).getTime() - Date.now()) / 86_400_000)) : 0);

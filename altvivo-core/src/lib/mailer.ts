@@ -190,6 +190,14 @@ export const templates = {
       html: layout(o.active ? 'Your free month is active' : 'Your free month is approved', `<p>Hi ${escapeHtml(name)},</p><p>Good news: your request for one month free was approved. ${escapeHtml(how)}</p>${button(link, o.active ? 'Open my applications' : 'Create my account')}<p>When the free month ends, access stops unless you choose a plan. Nothing is charged automatically.</p>`),
     };
   },
+  freeMonthStarted(name: string, days: number, apps: string[], link: string, endsOn: string): Omit<MailMessage, 'to'> {
+    const list = apps.join(' and ');
+    return {
+      subject: 'Your free month on AltVivo has started',
+      text: `Hi ${name},\n\nWelcome to AltVivo. Your ${days} days of free, full access to ${list} are active now and run until ${endsOn}.\n\n${link}\n\nWhen the free month ends, access stops unless you choose a plan. Nothing is charged automatically.`,
+      html: layout('Your free month has started', `<p>Hi ${escapeHtml(name)},</p><p>Welcome to AltVivo. Your <strong>${days} days of free, full access</strong> to ${escapeHtml(list)} are active now and run until <strong>${escapeHtml(endsOn)}</strong>.</p>${button(link, 'Open my applications')}<p>When the free month ends, access stops unless you choose a plan. Nothing is charged automatically.</p>`),
+    };
+  },
   trialDeclined(name: string, note: string | null, link: string): Omit<MailMessage, 'to'> {
     return {
       subject: 'About your request for one month free on AltVivo',

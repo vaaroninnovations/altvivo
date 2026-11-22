@@ -104,20 +104,20 @@ export default function TermsPage() {
       <h3 id="free-month">4.5 One month free</h3>
       <ul>
         <li>
-          You may ask for one period of free access to the Applications (the &quot;Free Month&quot;, normally 30 days) using the request form. We review each
-          request and may approve or decline it at our discretion.
+          Each new AltVivo account receives one period of free access to the Applications (the &quot;Free Month&quot;, normally 30 days). No request or
+          approval is needed.
         </li>
         <li>
-          The Free Month is personal to one named User and there is one per person. It starts when we switch your access on, which needs an AltVivo account
-          with a verified email address, and it covers the Applications named in our approval.
+          The Free Month is personal to one named User and there is one per person and per email address. It starts automatically when the account&apos;s
+          email address is verified, and it covers every Application open on AltVivo at that time.
         </li>
         <li>
           We do not ask for payment details for the Free Month and <strong>nothing is charged when it ends</strong>. Access to the Applications then stops until
           you or your institution buys a Licence. Your account and the content you created are kept as described in our Privacy Policy.
         </li>
         <li>
-          All of these Terms apply during the Free Month, including sections 5 and 6. We may end a Free Month early if these Terms are breached or the request
-          was made with false information. The Services are provided during the Free Month without any service commitment.
+          All of these Terms apply during the Free Month, including sections 5 and 6. We may end a Free Month early if these Terms are breached, the account was
+          created with false information, or one person holds more than one Free Month. The Services are provided during the Free Month without any service commitment.
         </li>
       </ul>
 

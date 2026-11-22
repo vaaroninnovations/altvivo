@@ -241,15 +241,15 @@ export function PricingView({
           <p className="mt-3 text-sm text-muted">
             Anything else? <a href="/contact" className="text-accent-ink underline">Contact us</a>.
           </p>
-          <ButtonLink href="/free-month" variant="outline" className="mt-5">
-            <Mail className="size-4" aria-hidden /> Request one month free
+          <ButtonLink href="/register?trial=1" variant="outline" className="mt-5">
+            <Mail className="size-4" aria-hidden /> Start one month free
           </ButtonLink>
         </div>
         <div className="divide-y divide-line rounded-2xl border border-line bg-surface">
           {[
             [
               "Is there a free trial?",
-              `Yes. Every new person can request ${trialDays} days of free, full access to XPRISM and aMaze. Our team approves requests, usually within one working day; no card is needed and nothing is charged when the month ends. There is no permanent free plan.`,
+              `Yes. Every new account gets ${trialDays} days of free, full access to XPRISM and aMaze, starting the moment you verify your email. No card is needed and nothing is charged when the month ends. There is no permanent free plan.`,
             ],
             ["Are XPRISM and aMaze sold together?", "No. They are separate products with separate subscriptions. Subscribe to the one you need, or to both."],
             ["What does one XPRISM account include?", `One yearly subscription covers up to ${XPRISM_STUDENTS} students and ${XPRISM_TEACHERS} teachers. A larger class needs a second account.`],

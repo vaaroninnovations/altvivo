@@ -2,14 +2,14 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Deps } from '../deps.js';
 import { audit, withAudit } from '../lib/audit.js';
-import { badRequest, forbidden, notFound, unauthorized } from '../lib/errors.js';
+import { badRequest, conflict, forbidden, notFound, unauthorized } from '../lib/errors.js';
 import { templates } from '../lib/mailer.js';
 import { assertPasswordPolicy, hashPassword, verifyPassword } from '../lib/password.js';
 import { actorOf, parse, requireUser } from '../plugins/security.js';
 import { buildEntitlements, loadAccess, toApiEntitlements } from '../services/access.js';
 import { listApps } from '../services/registry.js';
 import { MFA_REQUIRED_ROLES } from '../services/sessions.js';
-import { toApiTrial, trialForEmail } from '../services/trials.js';
+import { claimApprovedTrial, toApiTrial, trialForEmail } from '../services/trials.js';
 import { publicUser } from './auth.js';
 
 const ProfileBody = z
@@ -46,6 +46,23 @@ export default async function meRoutes(app: FastifyInstance, d: Deps) {
       },
       organization: user.organization,
     };
+  });
+
+  /**
+   * One click for an account that is already signed in: starts its free month
+   * now (verified address, once per person). Normally it starts by itself on
+   * e-mail verification or sign-in; this covers sessions opened before that.
+   */
+  app.post('/v1/api/free-month/start', opts, async (req) => {
+    const claims = req.auth!;
+    const user = await d.prisma.user.findUniqueOrThrow({ where: { id: claims.sub }, select: { id: true, email: true, emailVerifiedAt: true } });
+    if (!user.emailVerifiedAt) throw forbidden('EMAIL_NOT_VERIFIED', 'Verify your email address first: your free month starts the moment you do');
+    const started = await claimApprovedTrial(d, user, actorOf(req), req.log);
+    const trial = await trialForEmail(d, user.email);
+    if (!started && trial?.status !== 'ACTIVE') {
+      throw conflict(d.cfg.TRIAL_AUTO_GRANT ? 'FREE_MONTH_UNAVAILABLE' : 'FREE_MONTH_NEEDS_REVIEW', 'The free month could not be started for this account. Please contact support@altvivo.bio.');
+    }
+    return { started, trial: trial ? toApiTrial(trial) : null };
   });
 
   /** Everything the /workspace App Launcher renders, in one round trip. */

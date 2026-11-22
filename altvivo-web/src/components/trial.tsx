@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { ArrowRight, CalendarCheck, CheckCircle2, Clock3, Gift, Send, X } from "lucide-react";
-import { api, ApiError, fieldErrors } from "@/lib/api";
-import { FREE_MONTH_PATH, TRIAL_ROLES, trialDaysLeft, trialLength, trialState } from "@/lib/trial";
+import { useState } from "react";
+import { ArrowRight, CalendarCheck, Gift, MailCheck, UserPlus, X } from "lucide-react";
+import { api, ApiError, refreshSession } from "@/lib/api";
+import { FREE_MONTH_SIGNUP, trialDaysLeft, trialLength, trialState } from "@/lib/trial";
 import type { Trial } from "@/lib/types";
-import { Alert, Button, ButtonLink, Field, cx, formatDate } from "./ui";
+import { Alert, Button, ButtonLink, cx, formatDate } from "./ui";
 
 /** Site-wide announcement bar. Closing it lasts until the page is reloaded (nothing is stored). */
-export function TrialBanner({ days, href = FREE_MONTH_PATH, appNames }: { days: number; href?: string; appNames: string[] }) {
+export function TrialBanner({ days, href = FREE_MONTH_SIGNUP, appNames }: { days: number; href?: string; appNames: string[] }) {
   const [open, setOpen] = useState(true);
   if (!open) return null;
   const apps = appNames.length ? appNames.join(" and ") : "every live application";
@@ -22,7 +22,7 @@ export function TrialBanner({ days, href = FREE_MONTH_PATH, appNames }: { days: 
             Full access to {apps} for {days} days. No card needed.
           </span>{" "}
           <a href={href} className="inline-flex items-center gap-1 whitespace-nowrap font-semibold underline decoration-white/60 underline-offset-4 hover:decoration-white">
-            Request your free month <ArrowRight className="size-3.5" aria-hidden />
+            Start your free month <ArrowRight className="size-3.5" aria-hidden />
           </a>
         </p>
       </div>
@@ -38,13 +38,13 @@ export function TrialBanner({ days, href = FREE_MONTH_PATH, appNames }: { days: 
   );
 }
 
-/** Where a signed-in person's request stands (workspace, upgrade page, /free-month). */
+/** Where a signed-in person's free month stands (workspace, upgrade page, /free-month). */
 export function TrialStatus({ trial, compact = false }: { trial: Trial; compact?: boolean }) {
   const state = trialState(trial);
   if (state === "pending") {
     return (
-      <Alert tone="info" title="Your free month request is with our team">
-        Sent on {formatDate(trial.createdAt)}. We review every request, usually within one working day, and email you the moment it is approved.
+      <Alert tone="info" title="Your free month is ready to start">
+        It starts automatically as soon as your email address is verified, or the next time you sign in.
       </Alert>
     );
   }
@@ -80,169 +80,106 @@ export function TrialStatus({ trial, compact = false }: { trial: Trial; compact?
   }
   if (state === "declined") {
     return (
-      <Alert tone="info" title="We could not offer the free month for your last request">
-        You can send a new request with more detail about your institution and how you will use AltVivo, or go straight to a subscription.
+      <Alert tone="info" title="The free month is not available for this account">
+        Please contact support@altvivo.bio if you think this is a mistake, or go straight to a subscription.
       </Alert>
     );
   }
   return null;
 }
 
-interface AppOption {
-  appId: string;
-  name: string;
-}
-
-/** POST /v1/public/trial-request (CSRF + Origin checked, rate-limited; reviewed by a SuperAdmin). */
-export function TrialRequestForm({
-  apps,
-  days,
-  defaultName = "",
-  defaultEmail = "",
-  defaultInstitution = "",
-  signedIn = false,
-  onSent,
-}: {
-  apps: AppOption[];
-  days: number;
-  defaultName?: string;
-  defaultEmail?: string;
-  defaultInstitution?: string;
-  signedIn?: boolean;
-  onSent?: (trial: Trial | null) => void;
-}) {
-  const [form, setForm] = useState({ name: defaultName, email: defaultEmail, institution: defaultInstitution, designation: "", useCase: "", website: "" });
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<"received" | "already_requested" | null>(null);
-  const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm((f) => ({ ...f, [k]: e.target.value }));
-
-  async function submit(ev: FormEvent) {
-    ev.preventDefault();
-    const e: Record<string, string> = {};
-    if (form.name.trim().length < 2) e.name = "Enter your name";
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email)) e.email = "Enter a valid email address";
-    if (form.institution.trim().length < 2) e.institution = "Enter your college, university or organisation";
-    if (form.useCase.trim().length < 10) e.useCase = "Tell us in a sentence or two how you will use it";
-    setErrors(e);
-    if (Object.keys(e).length) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await api<{ status: "received" | "already_requested"; trial?: Trial }>("/v1/public/trial-request", {
-        method: "POST",
-        body: { name: form.name, email: form.email, institution: form.institution, designation: form.designation || null, useCase: form.useCase, website: form.website },
-      });
-      setDone(r.status);
-      onSent?.(r.trial ?? null);
-    } catch (err) {
-      setErrors(fieldErrors(err));
-      setError(
-        err instanceof ApiError && err.status === 429
-          ? "You have sent several requests in a short time. Please wait a little, or email support@altvivo.bio."
-          : err instanceof ApiError
-            ? err.message
-            : "Your request could not be sent. Please retry or email support@altvivo.bio.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (done) {
+/**
+ * The free month without a form: a visitor creates an account; a signed-in,
+ * verified account starts it with one click (POST /v1/api/free-month/start).
+ */
+export function FreeMonthStart({ days, signedIn, emailVerified }: { days: number; signedIn: boolean; emailVerified: boolean }) {
+  if (!signedIn) {
     return (
-      <div role="status" className="flex items-start gap-3 rounded-xl border border-live/30 bg-live-soft p-5 text-sm">
-        <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-live-ink" aria-hidden />
-        <div>
-          <p className="font-semibold text-fg">{done === "already_requested" ? "You have already asked for your free month." : "Thank you. Your request is with our team."}</p>
-          <p className="mt-1 leading-relaxed text-muted">
-            {done === "already_requested" ? (
-              "Each person gets one free month. Its status is shown in your workspace."
-            ) : (
-              <>
-                We review every request, usually within one working day, and reply to <span className="readout">{form.email}</span>.{" "}
-                {signedIn ? "Your free month starts the moment it is approved." : `Once approved, create your account with that address and your ${days} days begin.`}
-              </>
-            )}
-          </p>
-          {signedIn && (
-            <ButtonLink href="/workspace" size="sm" variant="outline" className="mt-4">
-              Back to my applications
-            </ButtonLink>
-          )}
-        </div>
+      <div className="space-y-4">
+        <ButtonLink href={FREE_MONTH_SIGNUP} size="lg" className="w-full sm:w-auto">
+          <UserPlus className="size-4" aria-hidden /> Create my free account
+        </ButtonLink>
+        <p className="text-sm text-muted">
+          Already registered?{" "}
+          <a href="/login?redirect=%2Fworkspace" className="font-medium text-accent-ink hover:underline">
+            Sign in
+          </a>{" "}
+          and your free month starts automatically.
+        </p>
+        <FreeMonthFinePrint />
       </div>
+    );
+  }
+  if (!emailVerified) {
+    return (
+      <Alert tone="info" title="Verify your email to start">
+        Open the verification link we sent you. Your {days} days begin the moment you do; there is nothing else to fill in.
+      </Alert>
     );
   }
 
   return (
-    <form onSubmit={submit} noValidate className="space-y-4">
-      {error && <Alert tone="danger">{error}</Alert>}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Your name" id="tr-name" error={errors.name}>
-          <input id="tr-name" className="field" value={form.name} onChange={set("name")} autoComplete="name" aria-invalid={!!errors.name} />
-        </Field>
-        <Field label="Work or institutional email" id="tr-email" error={errors.email} hint={signedIn ? "The free month is added to this account." : "Your free month is tied to this address."}>
-          <input id="tr-email" type="email" className="field" value={form.email} onChange={set("email")} autoComplete="email" aria-invalid={!!errors.email} readOnly={signedIn} />
-        </Field>
-        <Field label="College, university or organisation" id="tr-inst" error={errors.institution}>
-          <input id="tr-inst" className="field" value={form.institution} onChange={set("institution")} autoComplete="organization" aria-invalid={!!errors.institution} maxLength={300} />
-        </Field>
-        <Field label="Your role (optional)" id="tr-role">
-          <select id="tr-role" className="field" value={form.designation} onChange={set("designation")}>
-            <option value="">Choose…</option>
-            {TRIAL_ROLES.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
-
-      <div>
-        <p className="text-sm font-medium text-fg">Included</p>
-        <p className="mt-1 text-sm text-muted">
-          {apps.length ? apps.map((a) => a.name).join(" and ") : "Every live application"}: the free month covers every application on AltVivo.
-        </p>
-      </div>
-
-      <Field label="How will you use AltVivo?" id="tr-use" error={errors.useCase} hint="For example: the course or study, how many students or colleagues, and when you plan to start.">
-        <textarea id="tr-use" rows={4} className="field" value={form.useCase} onChange={set("useCase")} maxLength={2000} aria-invalid={!!errors.useCase} />
-      </Field>
-
-      {/* Honeypot: hidden from people and assistive technology, filled in by bots. */}
-      <div aria-hidden className="absolute -left-[9999px] h-0 w-0 overflow-hidden">
-        <label htmlFor="tr-website">Website</label>
-        <input id="tr-website" tabIndex={-1} autoComplete="off" value={form.website} onChange={set("website")} />
-      </div>
-
-      <p className="text-xs leading-relaxed text-subtle">
-        One free month per person. No payment details are asked for and nothing is charged when it ends. We use these details only to review your request and
-        contact you about it (see the{" "}
-        <a href="/privacy" className="underline">
-          Privacy Policy
-        </a>{" "}
-        and{" "}
-        <a href="/terms#free-month" className="underline">
-          Terms
-        </a>
-        ).
-      </p>
-      <Button type="submit" size="lg" loading={busy} className="w-full sm:w-auto">
-        <Send className="size-4" aria-hidden /> Request {trialLength(days)} free
-      </Button>
-    </form>
+    <div className="space-y-4">
+      <StartFreeMonthButton size="lg" />
+      <FreeMonthFinePrint />
+    </div>
   );
 }
 
-/** The three steps, shown beside the form and on the homepage. */
+/** POST /v1/api/free-month/start, then refresh the session so the new access shows everywhere at once. */
+export function StartFreeMonthButton({ size = "sm", disabled = false }: { size?: "sm" | "lg"; disabled?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function start() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/v1/api/free-month/start", { method: "POST" });
+      await refreshSession();
+      window.location.assign("/workspace");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Your free month could not be started. Please retry or email support@altvivo.bio.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <Button size={size} loading={busy} disabled={disabled} onClick={start} className={size === "lg" ? "w-full sm:w-auto" : undefined} title={disabled ? "Verify your email address first" : undefined}>
+        <Gift className="size-4" aria-hidden /> Start my free month
+      </Button>
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function FreeMonthFinePrint() {
+  return (
+    <p className="text-xs leading-relaxed text-subtle">
+      One free month per person, covering every application on AltVivo. No payment details are asked for and nothing is charged when it ends (see the{" "}
+      <a href="/terms#free-month" className="underline">
+        Terms
+      </a>{" "}
+      and{" "}
+      <a href="/privacy" className="underline">
+        Privacy Policy
+      </a>
+      ).
+    </p>
+  );
+}
+
+/** The three steps, shown on /free-month and the homepage. */
 export function TrialSteps({ days, className }: { days: number; className?: string }) {
   const steps = [
-    { Icon: Send, title: "Send the request", body: "Tell us who you are and how you plan to use XPRISM or aMaze. It takes a minute and needs no card." },
-    { Icon: Clock3, title: "We review it", body: "A person on our team reads every request, usually within one working day, and replies by email." },
-    { Icon: CalendarCheck, title: `Your ${days} days begin`, body: "Sign in with the same email address. The clock starts when your access is switched on, not when you asked." },
+    { Icon: UserPlus, title: "Create your account", body: "Your name, email and a password, or sign up with Google or ORCID. It takes a minute and needs no card." },
+    { Icon: MailCheck, title: "Verify your email", body: "Open the link we send you. There is no form to fill in and nobody to wait for." },
+    { Icon: CalendarCheck, title: `Your ${days} days begin`, body: "Full access to every application starts automatically the moment your address is verified." },
   ];
   return (
     <ol className={cx("grid gap-4", className)}>

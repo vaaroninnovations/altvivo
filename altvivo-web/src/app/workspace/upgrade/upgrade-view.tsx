@@ -5,7 +5,7 @@ import { ArrowLeft, Check, Gift, Lock, Rocket } from "lucide-react";
 import { AppIcon, AppLogo, hasAppLogo } from "@/components/brand";
 import { CheckoutDialog, type Viewer } from "@/components/checkout";
 import { Alert, ButtonLink, Card, StatusBadge, entitled, formatDate } from "@/components/ui";
-import { TrialStatus } from "@/components/trial";
+import { FreeMonthStart, TrialStatus } from "@/components/trial";
 import { PlanOptions } from "@/components/unlock";
 import { trialLength, trialState } from "@/lib/trial";
 import type { CatalogPlan, CatalogResponse, Trial, WorkspaceApp } from "@/lib/types";
@@ -117,11 +117,9 @@ export function UpgradeView({
                     <Gift className="size-4 text-accent-ink" aria-hidden /> Start with {trialLength(trialDays)} free
                   </p>
                   <p className="mt-2 text-sm leading-relaxed text-muted">
-                    {trialDays} days of full access to {app.name}. No card needed, nothing charged when it ends. We approve requests within one working day.
+                    {trialDays} days of full access to {app.name}. No card needed, nothing charged when it ends. It starts the moment you click.
                   </p>
-                  <ButtonLink href="/free-month" className="mt-4">
-                    Request your free month
-                  </ButtonLink>
+                  <div className="mt-4"><FreeMonthStart days={trialDays} signedIn emailVerified={viewer.emailVerified} /></div>
                 </Card>
               ) : trial && where !== "running" ? (
                 <TrialStatus trial={trial} compact />
