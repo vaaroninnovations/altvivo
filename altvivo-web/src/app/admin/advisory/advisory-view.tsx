@@ -381,7 +381,7 @@ function MemberDialog({ member, photoUploads, onClose, onSaved }: { member: Memb
           <Field label="Affiliation" id="m-aff">
             <input id="m-aff" className="field" required minLength={2} maxLength={300} value={f.affiliation} onChange={set("affiliation")} />
           </Field>
-          <Field label="URL slug" id="m-slug" hint={`/advisory-board#${f.slug || "…"}`}>
+          <Field label="URL slug" id="m-slug" hint={`Profile link: altvivo.bio/about#${f.slug || "…"}`}>
             <input
               id="m-slug"
               className="field readout"

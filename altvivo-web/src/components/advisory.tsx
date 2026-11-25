@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowUpRight, GraduationCap, Globe } from "lucide-react";
 import type { AdvisoryMember } from "@/lib/types";
 import { Dialog } from "./client";
@@ -89,8 +89,18 @@ export function MemberLinks({ member }: { member: AdvisoryMember }) {
 export function MemberCard({ member, compact = false }: { member: AdvisoryMember; compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const name = displayName(member);
+  // A profile link (/about#<slug>, e.g. from the welcome letter) opens that member's bio.
+  useEffect(() => {
+    if (compact) return;
+    const check = () => {
+      if (decodeURIComponent(window.location.hash.slice(1)) === member.slug) setOpen(true);
+    };
+    check();
+    window.addEventListener("hashchange", check);
+    return () => window.removeEventListener("hashchange", check);
+  }, [compact, member.slug]);
   return (
-    <article className="flex h-full flex-col rounded-2xl border border-line bg-surface p-6 transition hover:border-accent/40">
+    <article id={compact ? undefined : member.slug} className="flex h-full scroll-mt-24 flex-col rounded-2xl border border-line bg-surface p-6 transition hover:border-accent/40">
       <div className="flex items-start gap-4">
         <Portrait member={member} />
         <div className="min-w-0">

@@ -82,6 +82,131 @@ AltVivo
 [Phone] | [Website]`,
   },
   {
+    id: "advisory-board-welcome",
+    label: "Welcome: Advisory Board member",
+    subject: "Welcome to the AltVivo Advisory Board",
+    body: `Dear [Dr./Prof. Last Name],
+
+Thank you for accepting our invitation. It is a pleasure to welcome you to the AltVivo Advisory Board as an Advisory Member.
+
+Your term begins on [start date] and you will remain on the Board until [end date]. The term can be renewed by mutual consent before it ends.
+
+Your profile is now live on the AltVivo website:
+https://altvivo.bio/about#[profile-slug]
+
+Please look it over. If you would like any change to your name, designation, institution, photograph or bio, reply to this email and we will update it.
+
+As an Advisory Member, we will invite you to:
+• Offer guidance on the scientific direction and academic relevance of the platform
+• Review selected content or modules for scientific accuracy, as and when convenient
+• Suggest improvements, emerging research areas and collaboration opportunities
+• Join online advisory meetings, approximately [two] times a year
+
+This remains an honorary position, with no financial obligation and no fixed time commitment. We will write to you ahead of the first advisory meeting with the agenda.
+
+Thank you once again for lending your expertise to AltVivo's mission of humane, alternative approaches in teaching and research. We look forward to working with you.
+
+Warm regards,
+Dr. Vara Prasad Saka
+Founder
+AltVivo, Vaaron Innovations
+hello@altvivo.bio | https://altvivo.bio`,
+  },
+  {
+    id: "xprism-introduction",
+    label: "Letter: Introducing XPRISM to a college",
+    subject: "Introducing XPRISM – a virtual pharmacology laboratory for B.Pharm and M.Pharm programmes",
+    body: `To
+The Principal, the Deans and Heads of Department, and all Faculty Members
+[Name of the College of Pharmacy]
+[City, State]
+
+Respected Sir/Madam,
+
+We are pleased to introduce XPRISM, a web-based virtual pharmacology laboratory that lets pharmacy students perform experiments step by step, the way they would at the bench, without using live animals or costly isolated-tissue setups.
+
+XPRISM presents realistic apparatus, instruments and animal models on screen. Students mount tissues, add drugs, record responses and analyse results themselves, rather than watching a recorded demonstration. The experiments follow the Pharmacy Council of India (PCI) practical syllabus, and support the CPCSEA guidance to replace, reduce and refine animal use in teaching.
+
+XPRISM runs in any modern browser on desktops, laptops and lab computers, so it needs no special hardware and fits easily into your existing practical schedule.
+
+MODULES FOR B.PHARM
+XPRISM covers the experiments in the PCI practical syllabus for Pharmacology I, II and III (Semesters V to VII).
+
+Pharmacology I
+• Introduction to experimental pharmacology: lab animals, handling, CPCSEA norms, common instruments
+• Routes of drug administration: oral, IP, IV, SC and IM dosing in rats and mice, dose calculation
+• Drugs on the rabbit eye: mydriasis, miosis and pupil reflex with autonomic drugs
+• Local anaesthetics: surface and infiltration anaesthesia models
+• Locomotor activity: CNS stimulants and depressants on the actophotometer
+• Muscle coordination: skeletal muscle relaxants on the rota-rod
+• Anticonvulsant activity: MES and PTZ-induced convulsions
+• Anxiolytic activity: elevated plus maze
+
+Pharmacology II
+• Dose–response curves: acetylcholine on frog rectus abdominis and rat ileum
+• Agonists and antagonists: physostigmine potentiation, d-tubocurarine and atropine blockade
+• Histamine and antihistamines: guinea-pig ileum, DRC and antagonism
+• Bioassays: matching, bracketing, interpolation, three-point and four-point assays
+• pA2 determination: atropine and mepyramine pA2 values
+• Isolated heart: drugs on the isolated frog heart
+• Blood pressure: drugs on anaesthetised rat/dog BP
+
+Pharmacology III
+• Analgesic activity: hot plate and tail-flick methods
+• Anti-inflammatory activity: carrageenan-induced paw oedema
+• Anti-ulcer and diuretic activity: pylorus ligation, diuretic screening in rats
+
+MODULES FOR M.PHARM
+For M.Pharm (Pharmacology), XPRISM goes deeper into quantitative pharmacology and preclinical screening, in line with the PCI M.Pharm practicals.
+
+• Advanced bioassays: pA2 and pD2 values, Schild plots, competitive and non-competitive antagonism
+• Receptor pharmacology: agonist affinity and efficacy, cumulative dose–response curves
+• CNS screening: antidepressant (forced swim, tail suspension), sedative-hypnotic, antipsychotic and nootropic models
+• Cardiovascular screening: isolated heart, BP and anti-arrhythmic models
+• Analgesic and anti-inflammatory screening: writhing, hot plate, tail flick, paw oedema, cotton-pellet granuloma
+• Metabolic and GI screening: antidiabetic (OGTT, induced diabetes), anti-ulcer and hepatoprotective models
+• Toxicity studies: acute and sub-acute toxicity per OECD guidelines, LD50 estimation
+• Pharmacokinetics: plasma concentration–time data, AUC, half-life, clearance and volume of distribution
+• Research methodology: study design, sample size, statistical analysis and report writing
+
+These modules help postgraduate students plan and rehearse protocols before research work, and reduce the number of animals used during dissertation trials.
+
+FEATURES FOR TEACHERS
+XPRISM gives faculty more time to teach and less time setting up apparatus and preparing animals.
+• Hands-on, step-by-step experiments: students do every step themselves, from preparing the setup to recording the response, so teachers can check real understanding.
+• Classroom demonstration mode: project any experiment in a lecture before the practical session.
+• Assign experiments to batches: schedule practicals for a class, a batch or individual students.
+• Live progress tracking: see who has started, completed or is stuck on an experiment.
+• Automatic records and graphs: observations, tables and dose–response curves are generated for each student, ready for evaluation.
+• Built-in assessments: viva questions, quizzes and pre-lab and post-lab questions with automatic scoring.
+• Repeatable on demand: students can repeat an experiment as often as needed, with no extra drugs, tissues or animals.
+• Teaching support: theory notes, principles and expected results for every module.
+
+FEATURES FOR THE INSTITUTE
+For management, XPRISM lowers laboratory costs and strengthens the institute's academic and accreditation profile.
+• Ethical, CPCSEA-friendly teaching: cuts animal use in routine UG practicals and supports the 3Rs (replace, reduce, refine).
+• Lower running costs: fewer animals, drugs, tissues, chemicals and less equipment maintenance.
+• Central admin dashboard: manage departments, faculty, batches and student accounts from one place.
+• Reports for NAAC, NBA and PCI inspections: usage, attendance and performance reports ready to download.
+• Access anywhere: students can practise in the lab, library or at home on any browser.
+• Scales with intake: one licence covers B.Pharm and M.Pharm batches, with no extra lab space needed.
+• Training and support: onboarding for faculty and ongoing technical support from our team.
+• Modern, innovative image: shows prospective students and visiting committees that the institute uses current teaching technology.
+
+OUR REQUEST
+We would be glad to arrange a free live demonstration of XPRISM for your faculty at a date that suits you, followed by a trial for one batch of students. We are confident it will add real value to the practical training at your institute.
+
+Please reply to this email or call us at [Phone] to schedule the demonstration. You can also see XPRISM at https://altvivo.bio.
+
+Thank you for your time and consideration.
+
+Yours sincerely,
+Dr. Vara Prasad Saka
+Founder
+XPRISM by AltVivo, Vaaron Innovations
+[Phone] · hello@altvivo.bio · https://altvivo.bio`,
+  },
+  {
     id: "free-month-ending",
     label: "Free month ending soon",
     subject: "Your free month on AltVivo is ending",
