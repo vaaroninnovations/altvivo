@@ -85,33 +85,22 @@ const toBody = (f: Form) => {
   };
 };
 
-async function sha256Hex(file: File) {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"];
-const PHOTO_MAX_BYTES = 2 * 1024 * 1024;
+/** Matches core and the edge proxy, which count 2 MB in decimal. */
+const PHOTO_MAX_BYTES = 2_000_000;
 const NO_BUCKET = "Photo uploads are not set up on this server yet (no public media bucket). Paste an https photo URL instead.";
 
 /** Browser-side pre-check; core re-checks type and size and sniffs the uploaded bytes. */
 const photoProblem = (f: File) =>
   !PHOTO_TYPES.includes(f.type) ? "Use a JPEG, PNG or WebP image." : f.size > PHOTO_MAX_BYTES ? "The image must be 2 MB or smaller." : null;
 
-/** Signed upload straight to the public bucket, then core verifies it and sets the member's photo. */
+/**
+ * The image goes to core, which checks it and stores it in the public bucket.
+ * (A direct browser-to-R2 PUT needs a CORS rule on the bucket and failed with a bare "Failed to fetch".)
+ */
 async function uploadPortrait(memberId: string, file: File, photoAlt: string, onStep: (s: string) => void) {
-  onStep("Checksumming…");
-  const sha256 = await sha256Hex(file);
-  onStep("Requesting upload…");
-  const signed = await api<{ objectKey: string; uploadUrl: string; method: string; headers: Record<string, string> }>(`/v1/api/admin/advisory-board/${memberId}/photo-upload`, {
-    method: "POST",
-    body: { contentType: file.type, sizeBytes: file.size, sha256 },
-  });
   onStep("Uploading photo…");
-  const put = await fetch(signed.uploadUrl, { method: signed.method, headers: { "Content-Type": file.type, ...signed.headers }, body: file });
-  if (!put.ok) throw new Error(`Photo upload failed (${put.status}).`);
-  onStep("Verifying photo…");
-  await api(`/v1/api/admin/advisory-board/${memberId}/photo-complete`, { method: "POST", body: { objectKey: signed.objectKey, photoAlt } });
+  await api(`/v1/api/admin/advisory-board/${memberId}/photo?alt=${encodeURIComponent(photoAlt)}`, { method: "PUT", file });
 }
 
 const uploadError = (err: unknown) => (err instanceof Error && !("code" in err) ? err.message : adminError(err));

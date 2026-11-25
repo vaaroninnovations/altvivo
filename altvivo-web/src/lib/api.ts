@@ -47,19 +47,22 @@ export async function csrfToken(force = false): Promise<string> {
 interface Options {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
+  /** Raw bytes sent as-is (with their own Content-Type) instead of a JSON body. */
+  file?: Blob;
   /** Retry once after a silent refresh when the access token has expired. */
   retryOnExpiry?: boolean;
 }
 
-async function raw(path: string, { method = "GET", body }: Options) {
+async function raw(path: string, { method = "GET", body, file }: Options) {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (method !== "GET") headers["X-CSRF-Token"] = await csrfToken();
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (file) headers["Content-Type"] = file.type;
+  else if (body !== undefined) headers["Content-Type"] = "application/json";
   return fetch(`${PUBLIC.apiUrl}${path}`, {
     method,
     headers,
     credentials: "include",
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: file ?? (body === undefined ? undefined : JSON.stringify(body)),
   });
 }
 

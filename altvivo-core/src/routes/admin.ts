@@ -78,10 +78,20 @@ const PhotoUpload = z.object({
 });
 
 const IMAGE_MAGIC = IMAGE_SIGNATURES as Record<string, (b: Buffer) => boolean>;
+/** 2 MB as Caddy counts it (decimal), so the edge never rejects a file core would accept. */
+const PORTRAIT_MAX_BYTES = 2_000_000;
 
 export default async function adminRoutes(app: FastifyInstance, d: Deps) {
   const superadmin = requireUser(d, { roles: ['SUPERADMIN'], mfa: true });
   const opts = { config: { rateLimit: 'api' as const }, preHandler: superadmin };
+
+  /** The bucket key when photoUrl points at one of our own uploaded portraits. */
+  const ownPortraitKey = (photoUrl: string) => {
+    const base = d.cfg.R2_PUBLIC_BASE_URL.replace(/\/$/, '');
+    if (!d.cfg.R2_BUCKET_PUBLIC || !base || !photoUrl.startsWith(`${base}/`)) return null;
+    const key = photoUrl.slice(base.length + 1);
+    return /^advisory\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|png|webp)$/.test(key) ? key : null;
+  };
 
   // =========================================================== dashboard ===
   app.get('/v1/api/admin/dashboard', opts, async () => {
@@ -247,6 +257,14 @@ export default async function adminRoutes(app: FastifyInstance, d: Deps) {
     const m = await d.prisma.advisoryBoardMember.findUnique({ where: { id }, select: { photoUrl: true } });
     if (!m) throw notFound();
     if (!m.photoUrl) throw notFound('NO_PHOTO', 'This member has no photo');
+    // Our own uploads are read straight from the bucket, so the card does not depend on the public CDN URL.
+    const own = ownPortraitKey(m.photoUrl);
+    if (own) {
+      const body = await d.storage.readHead(d.cfg.R2_BUCKET_PUBLIC, own, PORTRAIT_MAX_BYTES + 1).catch(() => null);
+      const contentType = body && (Object.keys(IMAGE_MAGIC) as string[]).find((t) => IMAGE_MAGIC[t]!(body));
+      if (!body || !contentType) throw new HttpError(422, 'PHOTO_UNAVAILABLE', 'Could not load the photo from the media bucket');
+      return { contentType, dataUrl: `data:${contentType};base64,${body.toString('base64')}` };
+    }
     try {
       const img = await fetchRemoteImage(m.photoUrl);
       return { contentType: img.contentType, dataUrl: `data:${img.contentType};base64,${img.body.toString('base64')}` };
@@ -312,6 +330,38 @@ export default async function adminRoutes(app: FastifyInstance, d: Deps) {
     const signed = await d.storage.presignPut({ bucket: d.cfg.R2_BUCKET_PUBLIC, key: objectKey, contentType: body.contentType, contentLength: body.sizeBytes, sha256Hex: body.sha256, expiresIn: ttl });
     await d.redis.set(`advisory:photo:${objectKey}`, JSON.stringify({ id, contentType: body.contentType, sizeBytes: body.sizeBytes }), 'EX', ttl + 600);
     return { objectKey, uploadUrl: signed.url, method: 'PUT', headers: signed.headers };
+  });
+
+  /**
+   * Portrait upload through core: the browser sends the image bytes, core checks
+   * type, size and signature, then writes them to the public bucket itself. No
+   * bucket CORS rule is needed, unlike the signed PUT flow below.
+   */
+  await app.register(async (scope) => {
+    scope.addContentTypeParser(Object.keys(IMAGE_MAGIC), { parseAs: 'buffer', bodyLimit: PORTRAIT_MAX_BYTES }, (_req, body, done) => done(null, body));
+    scope.put<{ Querystring: { alt?: string } }>('/v1/api/admin/advisory-board/:id/photo', { ...opts, bodyLimit: PORTRAIT_MAX_BYTES }, async (req) => {
+      const { id } = parse(UuidParam, req.params);
+      const { alt: photoAlt } = parse(z.object({ alt: z.string().trim().min(3).max(300) }), req.query);
+      if (!d.cfg.R2_BUCKET_PUBLIC) throw new HttpError(409, 'PUBLIC_BUCKET_NOT_CONFIGURED', 'Set R2_BUCKET_PUBLIC to upload portraits, or paste an https photo URL');
+      const contentType = String(req.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase();
+      const body = req.body;
+      if (!Buffer.isBuffer(body) || !body.length || !IMAGE_MAGIC[contentType]) throw badRequest('INVALID_IMAGE', 'Send a JPEG, PNG or WebP image');
+      if (!IMAGE_MAGIC[contentType]!(body)) throw new HttpError(422, 'INVALID_IMAGE', 'The uploaded file is not the declared image');
+      const prev = await d.prisma.advisoryBoardMember.findUnique({ where: { id }, select: { photoUrl: true } });
+      if (!prev) throw notFound();
+      const objectKey = `advisory/${id}/${randomUUID()}.${contentType.split('/')[1]!.replace('jpeg', 'jpg')}`;
+      try {
+        await d.storage.put(d.cfg.R2_BUCKET_PUBLIC, objectKey, body, contentType);
+      } catch (err) {
+        req.log.error({ err, bucket: d.cfg.R2_BUCKET_PUBLIC }, 'advisory portrait upload to R2 failed');
+        throw new HttpError(502, 'PHOTO_STORE_FAILED', 'Could not store the photo in the media bucket. Check that the R2 token can write to R2_BUCKET_PUBLIC.');
+      }
+      const photoUrl = `${d.cfg.R2_PUBLIC_BASE_URL.replace(/\/$/, '')}/${objectKey}`;
+      const member = await withAudit(d.prisma, actorOf(req), (tx) => tx.advisoryBoardMember.update({ where: { id }, data: { photoUrl, photoAlt, updatedBy: req.auth!.sub } }));
+      const old = prev.photoUrl && ownPortraitKey(prev.photoUrl);
+      if (old && old.startsWith(`advisory/${id}/`)) await d.storage.remove(d.cfg.R2_BUCKET_PUBLIC, old).catch(() => undefined);
+      return { member };
+    });
   });
 
   app.post('/v1/api/admin/advisory-board/:id/photo-complete', opts, async (req) => {

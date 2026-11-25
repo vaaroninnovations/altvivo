@@ -581,6 +581,22 @@ describe('SUPERADMIN licences, pricing, CMS and audit', () => {
       ctx.storage.objects.set(up.objectKey, png);
       const done = json(await admin.b.request('POST', `/v1/api/admin/advisory-board/${m.id}/photo-complete`, { objectKey: up.objectKey, photoAlt: 'Portrait of Photo Member' }));
       expect(done.member.photoUrl).toBe(`https://media.altvivo.test/${up.objectKey}`);
+
+      // Upload through core: bytes are checked, stored, and the old portrait is removed.
+      const put = (body: Buffer, type: string, alt = 'Portrait of Photo Member') =>
+        admin.b.request('PUT', `/v1/api/admin/advisory-board/${m.id}/photo?alt=${encodeURIComponent(alt)}`, body, { 'content-type': type });
+      expect((await put(html, 'image/png')).statusCode).toBe(422);
+      expect((await put(png, 'image/gif')).statusCode).toBe(415);
+      expect((await put(png, 'image/png', 'x')).statusCode).toBe(400);
+      expect((await put(Buffer.concat([png, Buffer.alloc(2_000_001)]), 'image/png')).statusCode).toBe(413);
+      const direct = json(await put(png, 'image/png')).member;
+      const key = direct.photoUrl.replace('https://media.altvivo.test/', '');
+      expect(key).toMatch(new RegExp(`^advisory/${m.id}/[0-9a-f-]{36}\.png$`));
+      expect(ctx.storage.objects.get(key)).toEqual(png);
+      expect(ctx.storage.removed).toContain(up.objectKey);
+      // The welcome card reads our own upload straight from the bucket.
+      const card = json(await admin.b.request('GET', `/v1/api/admin/advisory-board/${m.id}/photo-data`));
+      expect(card.dataUrl).toBe(`data:image/png;base64,${png.toString('base64')}`);
     } finally {
       cfg.R2_BUCKET_PUBLIC = '';
       cfg.R2_PUBLIC_BASE_URL = '';
