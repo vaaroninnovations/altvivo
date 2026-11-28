@@ -109,7 +109,7 @@ Thank you once again for lending your expertise to AltVivo's mission of humane, 
 Warm regards,
 Dr. Vara Prasad Saka
 Founder
-AltVivo, Vaaron Innovations
+AltVivo, Aaron Innovations
 hello@altvivo.bio | https://altvivo.bio`,
   },
   {
@@ -203,7 +203,7 @@ Thank you for your time and consideration.
 Yours sincerely,
 Dr. Vara Prasad Saka
 Founder
-XPRISM by AltVivo, Vaaron Innovations
+XPRISM by AltVivo, Aaron Innovations
 [Phone] · hello@altvivo.bio · https://altvivo.bio`,
   },
   {
