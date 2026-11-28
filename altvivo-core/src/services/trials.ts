@@ -144,8 +144,10 @@ export async function claimApprovedTrial(d: Deps, user: { id: string; email: str
     const started = await withAudit(d.prisma, { ...actor, actorId: user.id, actorType: 'USER' }, async (tx) => {
       // Two sign-ins at once must not both start a month.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`trial:${user.email.toLowerCase()}`}))`;
-      const account = await tx.user.findUnique({ where: { id: user.id }, select: { fullName: true, affiliation: true, emailVerifiedAt: true, disabledAt: true } });
+      const account = await tx.user.findUnique({ where: { id: user.id }, select: { fullName: true, affiliation: true, emailVerifiedAt: true, disabledAt: true, role: true } });
       if (!account?.emailVerifiedAt || account.disabledAt) return null;
+      // VIP roles (SuperAdmin, Advisory Board) already have open-ended access: no free month.
+      if (d.cfg.vipRoles.has(account.role)) return null;
       const rows = await tx.trialRequest.findMany({ where: { OR: [{ email: user.email }, { userId: user.id }] }, orderBy: { createdAt: 'desc' } });
       if (rows.some((r) => r.status === 'ACTIVE')) return null;
 

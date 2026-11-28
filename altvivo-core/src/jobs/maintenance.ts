@@ -1,4 +1,5 @@
 import type { FastifyBaseLogger } from 'fastify';
+import type { UserRole } from '@prisma/client';
 import type { Deps } from '../deps.js';
 import { systemActor, withAudit } from '../lib/audit.js';
 import { randomToken } from '../lib/crypto.js';
@@ -96,7 +97,14 @@ export async function runMaintenance(d: Deps, log: FastifyBaseLogger): Promise<v
       take: 500,
     });
     let trialReminders = 0;
+    const vipIds = new Set(
+      trialsEnding.length
+        ? (await d.prisma.user.findMany({ where: { id: { in: trialsEnding.map((t) => t.userId!) }, role: { in: [...d.cfg.vipRoles] as UserRole[] } }, select: { id: true } })).map((u) => u.id)
+        : [],
+    );
     for (const t of trialsEnding) {
+      // VIP roles keep access when the month ends, so there is nothing to remind them of.
+      if (vipIds.has(t.userId!)) continue;
       const paid = await d.prisma.subscription.count({ where: { userId: t.userId, status: { in: ['ACTIVE', 'PAST_DUE'] }, currentPeriodEnd: { gt: t.endsAt! } } });
       if (paid) continue;
       const key = `jobs:trial-reminder:${t.id}`;

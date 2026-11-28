@@ -54,7 +54,11 @@ export function buildEntitlements(rows: readonly AccessRow[], o: BuildOptions): 
   let tier: AccessTier = 'NONE';
   for (const r of rows) {
     let e: EntitlementClaim = NONE;
-    if (r.active) {
+    // VIP first: an honorary pass never expires, so a free month or a paid
+    // licence held alongside it must not put an end date on the account.
+    if (vip && VIP_OPEN.has(r.app_status)) {
+      e = { active: true, level: 'full', source: 'vip', plan: null, expires_at: null };
+    } else if (r.active) {
       e = {
         active: true,
         level: 'full',
@@ -62,8 +66,6 @@ export function buildEntitlements(rows: readonly AccessRow[], o: BuildOptions): 
         plan: r.plan_code,
         expires_at: r.expires_at ? Math.floor(r.expires_at.getTime() / 1000) : null,
       };
-    } else if (vip && VIP_OPEN.has(r.app_status)) {
-      e = { active: true, level: 'full', source: 'vip', plan: null, expires_at: null };
     }
     entitlements[r.app_id] = e;
     if (e.source) {

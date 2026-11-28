@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { runMaintenance } from '../src/jobs/maintenance.js';
 import { Browser, createTestContext, type TestContext } from './helpers.js';
 
 let ctx: TestContext;
@@ -21,7 +22,7 @@ async function verify(b: Browser, email: string) {
   await b.request('POST', '/v1/auth/refresh');
 }
 
-const xprism = (ws: { apps: { appId: string; entitlement: { active: boolean } }[] }) => ws.apps.find((a) => a.appId === 'xprism')!.entitlement;
+const xprism = (ws: { apps: { appId: string; entitlement: { active: boolean; source?: string | null; expiresAt?: string | null } }[] }) => ws.apps.find((a) => a.appId === 'xprism')!.entitlement;
 
 beforeAll(async () => {
   ctx = await createTestContext({ TRIAL_AUTO_GRANT: 'true' });
@@ -105,5 +106,33 @@ describe('automatic free month', () => {
     const again = await b.request('POST', '/v1/public/trial-request', { name: 'Dr Late', email: 'late@lab.edu', institution: 'Test College', useCase: 'Asking again after sign-up.' });
     expect(again.statusCode).toBe(200);
     expect(json(again)).toMatchObject({ status: 'already_requested', trial: { status: 'ACTIVE' } });
+  });
+  it('gives Advisory Board members no free month: their access is open-ended from the start', async () => {
+    const b = browser();
+    await register(b, 'advisor.auto@pharma.edu');
+    await ctx.deps.prisma.user.update({ where: { email: 'advisor.auto@pharma.edu' }, data: { role: 'ADVISORY_BOARD' } });
+    await verify(b, 'advisor.auto@pharma.edu');
+    expect(await ctx.deps.prisma.trialRequest.count({ where: { email: 'advisor.auto@pharma.edu' } })).toBe(0);
+    expect(xprism(json(await b.request('GET', '/v1/api/workspace')))).toMatchObject({ active: true, source: 'vip', expiresAt: null });
+    expect(json(await b.request('GET', '/v1/auth/session')).user.tier).toBe('VIP');
+    expect(ctx.mailer.sent.some((m) => m.to === 'advisor.auto@pharma.edu' && /free month/i.test(m.subject))).toBe(false);
+  });
+
+  it('shows no end date and sends no reminder to a member made Advisory Board during their free month', async () => {
+    const b = browser();
+    await register(b, 'advisor.later@pharma.edu');
+    await verify(b, 'advisor.later@pharma.edu');
+    expect(xprism(json(await b.request('GET', '/v1/api/workspace')))).toMatchObject({ source: 'trial' });
+    await ctx.deps.prisma.user.update({ where: { email: 'advisor.later@pharma.edu' }, data: { role: 'ADVISORY_BOARD' } });
+    await b.request('POST', '/v1/auth/refresh');
+    expect(xprism(json(await b.request('GET', '/v1/api/workspace')))).toMatchObject({ active: true, source: 'vip', expiresAt: null });
+
+    // Month ends in two days: an ordinary member is reminded, the advisor is not.
+    const soon = new Date(Date.now() + 2 * 86_400_000);
+    await ctx.deps.prisma.trialRequest.updateMany({ where: { email: { in: ['advisor.later@pharma.edu', 'auto.person@lab.edu'] } }, data: { endsAt: soon } });
+    const log = { info: () => undefined, warn: () => undefined, error: () => undefined } as never;
+    await runMaintenance(ctx.deps, log);
+    expect(ctx.mailer.sent.some((m) => m.to === 'auto.person@lab.edu' && /free month on AltVivo ends on/.test(m.subject))).toBe(true);
+    expect(ctx.mailer.sent.filter((m) => m.to === 'advisor.later@pharma.edu' && /free month on AltVivo ends on/.test(m.subject))).toHaveLength(0);
   });
 });
